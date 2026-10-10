@@ -334,7 +334,7 @@ func close_dialog() -> void:
 	touch.visible = touch_enabled and not menu.visible
 
 func set_hint(value: String) -> void:
-	hint.text = ("Коснись выделенного объекта" if touch_enabled else "[E]  " + value) if not value.is_empty() else ""
+	hint.text = ("" if touch_enabled else "[E]  " + value) if not value.is_empty() else ""
 	action_button.hide()
 
 func set_focus_bounds(bounds: Rect2) -> void:

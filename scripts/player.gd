@@ -8,10 +8,14 @@ var locked: bool = false
 var touch_move: Vector2 = Vector2.ZERO
 var focus: Object
 var touch_mode: bool = false
+var focus_query := PhysicsRayQueryParameters3D.new()
+var last_focus_prompt := ""
 
 func _ready() -> void:
 	touch_mode = DisplayServer.is_touchscreen_available() or "--touch" in OS.get_cmdline_user_args()
 	ray.add_exception(self)
+	focus_query.collision_mask = 1
+	focus_query.exclude = [get_rid()]
 	if not touch_mode and DisplayServer.get_name() != "headless":
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
@@ -30,11 +34,15 @@ func _physics_process(delta: float) -> void:
 		velocity.y = 0
 	move_and_slide()
 	focus = find_focus() if not locked else null
+	var prompt := ""
 	if is_instance_valid(focus) and focus.has_method("interact"):
-		focus_changed.emit(focus.prompt)
+		prompt = focus.prompt
 	else:
 		focus = null
-		focus_changed.emit("")
+	# UI text/shaping only needs notification when the displayed prompt changes.
+	if prompt != last_focus_prompt:
+		last_focus_prompt = prompt
+		focus_changed.emit(prompt)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if locked:
@@ -74,16 +82,22 @@ func find_focus() -> Object:
 	var best: Object = null
 	var best_score := .90
 	var game := get_parent()
-	for group in game.targets.values():
-		for body in group:
+	var eye := camera.global_position
+	var forward := -camera.global_basis.z
+	var space := get_world_3d().direct_space_state
+	focus_query.from = eye
+	for id in game.targets:
+		for body in game.targets[id]:
 			if not is_instance_valid(body) or body.collision_layer == 0: continue
 			var point: Vector3 = body.to_global(body.get_meta("focus_point", Vector3.ZERO))
-			var offset: Vector3 = point - camera.global_position
-			if offset.length() > 3.8 or offset.length() < .1: continue
-			var score := -camera.global_basis.z.dot(offset.normalized())
+			var offset: Vector3 = point - eye
+			var distance_squared := offset.length_squared()
+			if distance_squared > 14.44 or distance_squared < .01: continue
+			var direction := offset / sqrt(distance_squared)
+			var score := forward.dot(direction)
 			if score <= best_score: continue
-			var query := PhysicsRayQueryParameters3D.create(camera.global_position, point + offset.normalized() * .08, 1, [get_rid()])
-			var hit := get_world_3d().direct_space_state.intersect_ray(query)
+			focus_query.to = point + direction * .08
+			var hit := space.intersect_ray(focus_query)
 			var blocker: Object = hit.get("collider")
 			if blocker == body or (is_instance_valid(blocker) and blocker.has_method("interact") and blocker.interaction_id == body.interaction_id):
 				best = body

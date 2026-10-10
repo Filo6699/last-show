@@ -68,6 +68,10 @@ func setup(owner_game: Node3D) -> void:
 			photo_target.add_child(frame)
 			var caption := Label3D.new();caption.text=("ДО" if row==0 else "ПОСЛЕ")+" · "+game.database.SPEAKERS[id]
 			caption.font_size=32;caption.pixel_size=.003;caption.position=frame.position+Vector3(0,-.48,.015);photo_target.add_child(caption)
+	var batches := Node3D.new()
+	batches.name = "StaticEnvironmentBatches"
+	add_child(batches)
+	batches.set_meta("statistics", preload("res://scripts/static_batches.gd").apply(game.model, batches))
 	stage_show=preload("res://scripts/stage_show.gd").new();add_child(stage_show);stage_show.setup(game)
 
 func gate(id: String, at: Vector3, color: Color) -> void:

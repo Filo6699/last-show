@@ -28,10 +28,14 @@ var actor_tween: Tween
 var camera_tween: Tween
 var mirror_system: Node3D
 var location: Node3D
+var elsa_rope: MeshInstance3D
 var last_safe_position := Vector3(-3, .05, 3)
 
 func _ready() -> void:
 	configure_input()
+	if OS.has_feature("mobile"):
+		get_window().size_changed.connect(configure_render_budget)
+		configure_render_budget()
 	var doctor := StaticBody3D.new()
 	doctor.name = "Walter"
 	doctor.set_script(INTERACTABLE)
@@ -53,6 +57,7 @@ func _ready() -> void:
 	world.add_child(location)
 	location.setup(self)
 	for id in actors: location.actor_visual(id, actors[id])
+	elsa_rope = actors["elsa"].get_node("Suspension")
 	mirror_system = preload("res://scripts/mirrors.gd").new()
 	world.add_child(mirror_system)
 	mirror_system.setup(self)
@@ -76,6 +81,12 @@ func _ready() -> void:
 	update_staging()
 	player.set_locked(true)
 	hud.show_menu("main", read_save().size() > 0)
+
+func configure_render_budget() -> void:
+	# Limit only 3D pixel work on high-DPI phones; dialogue and touch UI stay native.
+	var pixels := Vector2(get_window().size)
+	get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+	get_viewport().scaling_3d_scale = minf(1.0, minf(1280.0 / maxf(1.0, pixels.x), 720.0 / maxf(1.0, pixels.y)))
 
 func configure_input() -> void:
 	var bindings := {"move_forward": [KEY_W, KEY_UP], "move_back": [KEY_S, KEY_DOWN],
@@ -116,16 +127,12 @@ func bind_imported(mesh_name: String, id: String, prompt: String) -> void:
 			targets[id].append(body)
 
 func _process(delta: float) -> void:
-	for actor in actors.values():
-		# Real bodies remain in the world; portraits belong only to the dialogue UI.
-		actor.get_node("CharacterArt").visible = true
 	if actors["elsa"].visible:
-		pass # Elsa moves through staged tweens; never overwrite her height every frame.
-		var rope: MeshInstance3D = actors["elsa"].get_node("Suspension")
 		var ceiling: float = 3.59 if actors["elsa"].position.x < -11 else 6.8-2.3*absf(actors["elsa"].position.z)/8.0
 		var length: float = maxf(.05,ceiling-actors["elsa"].position.y-.75)
-		rope.mesh.height = length
-		rope.position = Vector3(0,.75+length/2,0)
+		# Keep the authored cylinder; stretch its instance instead of rebuilding mesh buffers.
+		elsa_rope.scale.y = length / elsa_rope.mesh.height
+		elsa_rope.position = Vector3(0,.75+length/2,0)
 	if not player.locked and not transitioning:
 		check_walk_progress()
 	if not player.locked and not sequence_id.is_empty():

@@ -15,7 +15,12 @@ func material(color: String) -> StandardMaterial3D:
 	var m:=StandardMaterial3D.new();m.albedo_color=Color(color);m.roughness=.95;return m
 func box(at: Vector3, size: Vector3, color: String, collision := false) -> MeshInstance3D:
 	var node:=MeshInstance3D.new();var mesh:=BoxMesh.new();mesh.size=size;node.mesh=mesh;node.material_override=material(color);node.position=at;add_child(node)
-	if collision: node.create_trimesh_collision()
+	if collision:
+		var body := StaticBody3D.new()
+		var shape := CollisionShape3D.new()
+		var bounds := BoxShape3D.new(); bounds.size = size
+		shape.shape = bounds
+		node.add_child(body); body.add_child(shape)
 	return node
 func instances(mesh: Mesh, positions: Array[Vector3], color: String) -> MultiMeshInstance3D:
 	var node:=MultiMeshInstance3D.new();var multi:=MultiMesh.new();multi.transform_format=MultiMesh.TRANSFORM_3D;multi.mesh=mesh;multi.instance_count=positions.size()
@@ -23,6 +28,7 @@ func instances(mesh: Mesh, positions: Array[Vector3], color: String) -> MultiMes
 	node.multimesh=multi;node.material_override=material(color);add_child(node);return node
 func setup(owner_game):
 	game=owner_game
+	set_process(false)
 	# Shallow physical steps connect the opening platform to the walkable ring.
 	box(Vector3(0,.07,-4.92),Vector3(3,.14,.55),"5f4030",true)
 	box(Vector3(0,.16,-5.22),Vector3(3,.18,.4),"6d4933",true)
@@ -56,13 +62,18 @@ func setup(owner_game):
 func _process(delta):
 	if game.hud.menu.visible or applause<=0: return
 	applause-=delta
+	if applause <= 0:
+		set_process(false)
+		return
+	var phase := Time.get_ticks_msec() * .006
 	for i in seats.size():
-		var separation := .055+absf(sin(Time.get_ticks_msec()*.006+i*.71))*.15
+		var separation := .055+absf(sin(phase+i*.71))*.15
 		for side in 2:
 			var p: Vector3=seats[i]+Vector3((-1 if side==0 else 1)*separation,.28,-.22)
 			hand_instances.multimesh.set_instance_transform(i*2+side,Transform3D(Basis.IDENTITY,p))
 func opening_action(action: String):
 	applause=8
+	set_process(true)
 	var tween:=create_tween();animations.append(tween)
 	if action=="cane":
 		cane.show();tween.tween_property(cane,"position:y",-.12,.45);tween.tween_interval(.7);tween.tween_property(cane,"position:y",-.55,.45);tween.tween_callback(cane.hide)
@@ -115,6 +126,7 @@ func reset():
 	for tween in animations:
 		if tween and tween.is_valid(): tween.kill()
 	animations.clear();applause=0
+	set_process(false)
 	if is_instance_valid(cane): cane.hide()
 	if is_instance_valid(loose_canvas):loose_canvas.hide();loose_canvas.rotation=Vector3.ZERO
 

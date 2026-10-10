@@ -39,7 +39,6 @@ func setup(owner_game):
 	add_child(canvas)
 	outline_rect = ColorRect.new()
 	outline_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	outline_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var material := ShaderMaterial.new()
 	material.shader = preload("res://assets/shaders/focus_outline.gdshader")
 	material.set_shader_parameter("silhouette", mask_view.get_texture())
@@ -162,3 +161,11 @@ func _process(_delta):
 	box = Rect2(box.position * ratio, box.size * ratio).grow(8)
 	box = box.intersection(Rect2(Vector2(12, 12), game.hud.root.size - Vector2(24, 24)))
 	game.hud.set_focus_bounds(box)
+	# Restrict the nine texture samples per pixel to the target's projected area.
+	# Canvas coordinates match the HUD; mask UVs remain in the full camera image.
+	outline_rect.position = box.position
+	outline_rect.size = box.size
+	var screen_size: Vector2 = game.hud.root.size
+	outline_rect.material.set_shader_parameter("mask_rect", Vector4(
+		box.position.x / screen_size.x, box.position.y / screen_size.y,
+		box.size.x / screen_size.x, box.size.y / screen_size.y))
