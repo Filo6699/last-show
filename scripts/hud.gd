@@ -41,6 +41,7 @@ var action_button: Button
 var pause_timer: Timer
 var focus_frame: ReferenceRect
 var photo_pair: HBoxContainer
+var photo_dialog_style: StyleBox
 var voice_speed := 22.0
 var voice_color := Color("b5a185")
 
@@ -151,12 +152,14 @@ func _ready() -> void:
 	portrait_backdrop.color = Color(.035, .03, .045, .48)
 	portrait_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(portrait_backdrop)
+	portrait_backdrop.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	portrait_backdrop.hide()
 	portrait = TextureRect.new()
 	portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(portrait)
+	portrait.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	portrait.visibility_changed.connect(func(): portrait_backdrop.visible = portrait.visible)
 	story_caption = label("", Vector2(-260, -60), Vector2(520, 70))
 	story_caption.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -241,14 +244,26 @@ func layout_dialog() -> void:
 	item.offset_bottom = 140
 	var width := minf(1000, root.size.x - 40)
 	var height := minf(370 if showing_choices else 250, root.size.y - 48)
+	if photo_pair.visible:
+		width = minf(300, root.size.x - 40)
+		height = minf(64, root.size.y - 48)
 	dialog.position = Vector2((root.size.x - width) * 0.5, root.size.y - height - 20)
 	dialog.size = Vector2(width, height)
-	var portrait_height := minf(330, maxf(0, root.size.y - height - 64))
-	var portrait_width := minf(320, root.size.x * .27)
-	portrait.position = Vector2(24, dialog.position.y - portrait_height - 12)
-	portrait.size = Vector2(portrait_width, portrait_height)
-	portrait_backdrop.position = portrait.position - Vector2(8, 0)
-	portrait_backdrop.size = portrait.size + Vector2(16, 0)
+	# Fill the space above the dialogue, preserving the complete character art.
+	var portrait_space := Vector2(maxf(0, root.size.x - 40), maxf(0, dialog.position.y - 24))
+	var portrait_size := portrait_space
+	if portrait.texture != null:
+		var image_size := portrait.texture.get_size()
+		portrait_size = image_size * minf(portrait_space.x / image_size.x, portrait_space.y / image_size.y)
+	# Symmetric offsets keep the portrait centered even during viewport resizing.
+	portrait.offset_left = -portrait_size.x * .5
+	portrait.offset_right = portrait_size.x * .5
+	portrait.offset_top = 12 + (portrait_space.y - portrait_size.y) * .5
+	portrait.offset_bottom = portrait.offset_top + portrait_size.y
+	portrait_backdrop.offset_left = portrait.offset_left - 8
+	portrait_backdrop.offset_right = portrait.offset_right + 8
+	portrait_backdrop.offset_top = portrait.offset_top
+	portrait_backdrop.offset_bottom = portrait.offset_bottom
 	objective.size.x = minf(560, maxf(180, root.size.x - 140))
 	for button in choices.get_children():
 		var text: Label = button.get_node("Text")
@@ -263,6 +278,12 @@ func show_line(who: String, text: String, image: Texture2D, options: Array, mini
 	pause_timer.stop()
 	if text_tween:
 		text_tween.kill()
+	if dialog.get_theme_stylebox("panel") is StyleBoxEmpty and photo_dialog_style != null:
+		dialog.add_theme_stylebox_override("panel", photo_dialog_style)
+	speaker.show()
+	words.show()
+	choices.show()
+	next_button.text = "Продолжить"
 	speaker.text = who
 	words.text = text
 	words.visible_characters = 0
@@ -306,6 +327,7 @@ func show_line(who: String, text: String, image: Texture2D, options: Array, mini
 		text_tween.tween_callback(words.set.bind("visible_characters", index + 1))
 		if text[index] in [",", ";", ":"]: text_tween.tween_interval(.14)
 		elif text[index] in [".", "!", "?", "…"]: text_tween.tween_interval(.28)
+	layout_dialog()
 	layout_dialog.call_deferred()
 	if minimum_pause > 0: pause_timer.start(minimum_pause)
 
@@ -352,6 +374,19 @@ func set_focus_bounds(bounds: Rect2) -> void:
 			minf(bounds.end.y + 12, root.size.y - hint.size.y - 20))
 
 func show_photo_pair(before: Texture2D, after: Texture2D) -> void:
+	pause_timer.stop()
+	if text_tween: text_tween.kill()
+	line_ready = true
+	speaker.hide()
+	words.hide()
+	choices.hide()
+	if not dialog.get_theme_stylebox("panel") is StyleBoxEmpty:
+		photo_dialog_style = dialog.get_theme_stylebox("panel")
+	dialog.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	next_button.text = "Назад"
+	next_button.disabled = false
+	next_button.show()
+	words.visible_characters = -1
 	portrait.hide()
 	for child in photo_pair.get_children():
 		photo_pair.remove_child(child); child.queue_free()
