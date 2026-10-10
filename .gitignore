@@ -1,0 +1,8 @@
+.godot/
+builds/
+*.tmp
+*.keystore
+.DS_Store
+*.blend1
+*.blend2
+__pycache__/

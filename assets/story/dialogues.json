@@ -1,0 +1,600 @@
+{
+  "version": 1,
+  "sequences": {
+    "intro": {
+      "start": "0",
+      "nodes": {
+        "0": {
+          "speaker": "narrator",
+          "text": "Шатёр цирка. Представление подходит к концу.",
+          "next": "1"
+        },
+        "1": {
+          "speaker": "richard",
+          "text": "",
+          "choices": [
+            {
+              "text": "Поклониться",
+              "next": "2",
+              "set": {
+                "opening_action": "bow"
+              }
+            },
+            {
+              "text": "Помаргивать зрителям",
+              "next": "2",
+              "set": {
+                "opening_action": "wink"
+              }
+            },
+            {
+              "text": "Поднять трость",
+              "next": "2",
+              "set": {
+                "opening_action": "cane"
+              }
+            }
+          ],
+          "next": "2"
+        },
+        "2": {
+          "speaker": "richard",
+          "text": "До скорой встречи!",
+          "event": "applause",
+          "next": "3"
+        },
+        "3": {
+          "speaker": "narrator",
+          "text": "Крыша купола немного обваливается. Зрители аплодируют не в такт. Некоторые продолжают хлопать, когда музыка уже остановилась.",
+          "event": "roof_crack",
+          "next": "4"
+        },
+        "4": {
+          "speaker": "audience",
+          "text": "Ещё раз.",
+          "event": "audience",
+          "next": "end"
+        }
+      }
+    },
+    "mordecai_news": {
+      "start": "0",
+      "nodes": {
+        "0": {
+          "speaker": "mordecai",
+          "text": "Слышал новости?",
+          "next": "1"
+        },
+        "1": {
+          "speaker": "richard",
+          "text": "",
+          "choices": [
+            {
+              "text": "Какие?",
+              "next": "2",
+              "set": {
+                "news_reply": "ask"
+              }
+            },
+            {
+              "text": "Мне всё равно.",
+              "next": "2",
+              "set": {
+                "news_reply": "dismiss"
+              }
+            }
+          ],
+          "next": "2"
+        },
+        "2": {
+          "speaker": "mordecai",
+          "text": "У нас будет новый ведущий.",
+          "next": "3"
+        },
+        "3": {
+          "speaker": "mordecai",
+          "text": "Молодой. Чистый. Настоящий человек.",
+          "next": "4"
+        },
+        "4": {
+          "speaker": "richard",
+          "text": "И что?",
+          "next": "5"
+        },
+        "5": {
+          "speaker": "mordecai",
+          "text": "А ты станешь артистом.",
+          "next": "6"
+        },
+        "6": {
+          "speaker": "mordecai",
+          "text": "Наконец-то.",
+          "next": "end"
+        }
+      }
+    },
+    "mirror": {
+      "start": "0",
+      "nodes": {
+        "0": {
+          "speaker": "narrator",
+          "text": "В зеркале нет отражения. Только пустая поверхность.",
+          "event": "mirror_empty",
+          "pause": 1.8,
+          "next": "1"
+        },
+        "1": {
+          "speaker": "narrator",
+          "text": "Отражение появляется. Но оно улыбается раньше тебя.",
+          "event": "mirror_scare",
+          "pause": 0.6,
+          "next": "2"
+        },
+        "2": {
+          "speaker": "richard",
+          "text": "Мне нужно выбираться отсюда...",
+          "next": "end"
+        }
+      }
+    },
+    "elsa_dressing": {
+      "start": "0",
+      "nodes": {
+        "0": {
+          "speaker": "elsa",
+          "text": "Сбежать? Никто отсюда не выходит через главный вход.",
+          "next": "1"
+        },
+        "1": {
+          "speaker": "richard",
+          "text": "А ты пробовала?",
+          "next": "2"
+        },
+        "2": {
+          "speaker": "elsa",
+          "text": "Через крышу есть старый технический выход. Раньше артисты использовали его, чтобы покидать цирк после представления.",
+          "next": "end"
+        }
+      }
+    },
+    "lili": {
+      "start": "0",
+      "nodes": {
+        "0": {
+          "speaker": "lili",
+          "text": "Ты тоже хочешь уйти?",
+          "event": "lili_appears",
+          "next": "1"
+        },
+        "1": {
+          "speaker": "richard",
+          "text": "Лили? Почему ты в моей коробке для фокусов?",
+          "next": "2"
+        },
+        "2": {
+          "speaker": "richard",
+          "text": "",
+          "choices": [
+            {
+              "text": "Да. Я собираюсь уйти.",
+              "next": "leave",
+              "set": {
+                "wants_leave": true
+              }
+            },
+            {
+              "text": "Я никуда не уйду.",
+              "next": "stay",
+              "set": {
+                "wants_leave": false
+              }
+            }
+          ],
+          "next": "3"
+        },
+        "leave": {
+          "speaker": "lili",
+          "text": "Почему? Здесь же классно! И друзья у тебя есть!",
+          "next": "leave_choice"
+        },
+        "leave_choice": {
+          "speaker": "richard",
+          "text": "",
+          "choices": [
+            {
+              "text": "Я не знаю, что именно со мной будет, когда придёт новый ведущий. А я... не горю желанием выступать в цирке не в роли ведущего.",
+              "next": "lili_end",
+              "set": {
+                "wants_leave": true
+              }
+            },
+            {
+              "text": "Я... Передумал. Останусь.",
+              "next": "stay",
+              "set": {
+                "wants_leave": false
+              }
+            }
+          ],
+          "next": "5"
+        },
+        "stay": {
+          "speaker": "lili",
+          "text": "Отлично! Ты красивый сегодня, хотя позже станешь ещё красивее!",
+          "next": "repair"
+        },
+        "repair": {
+          "speaker": "richard",
+          "text": "Ты же отвечаешь за страховку в номерах? Я видел, крыша на ремонте, я же могу помочь?",
+          "next": "refusal"
+        },
+        "refusal": {
+          "speaker": "lili",
+          "text": "Хи-хи! Ты меня не проведёшь! НЕЛЬЗЯ!",
+          "next": "lili_end"
+        },
+        "lili_end": {
+          "speaker": "narrator",
+          "text": "Лили выскакивает из коробки и убегает. На крышке становится видно имя: RICHARD.",
+          "next": "end",
+          "event": "lili_leaves"
+        }
+      }
+    },
+    "mordecai_bruno": {
+      "start": "0",
+      "nodes": {
+        "0": {
+          "speaker": "bruno",
+          "text": "Да...",
+          "next": "1"
+        },
+        "1": {
+          "speaker": "mordecai",
+          "text": "Даже не знаю, надолго ли новый ведущий. Я его видел, неприятный тип. Ещё не начал работать, а уже раздражает.",
+          "next": "2"
+        },
+        "2": {
+          "speaker": "bruno",
+          "text": "Мгм.",
+          "next": "3"
+        },
+        "3": {
+          "speaker": "mordecai",
+          "text": "А ты почему заявился тут?",
+          "next": "4"
+        },
+        "4": {
+          "speaker": "richard",
+          "text": "Ээ... Я бы хотел узнать, могу ли помочь с ремонтом на крыше?",
+          "next": "5"
+        },
+        "5": {
+          "speaker": "mordecai",
+          "text": "На крыше?",
+          "next": "6"
+        },
+        "6": {
+          "speaker": "richard",
+          "text": "Да. Я видел, что там всё ещё не закончили ремонт.",
+          "next": "7"
+        },
+        "7": {
+          "speaker": "mordecai",
+          "text": "И ты решил помочь?",
+          "next": "8"
+        },
+        "8": {
+          "speaker": "richard",
+          "text": "Ну... да.",
+          "next": "9"
+        },
+        "9": {
+          "speaker": "mordecai",
+          "text": "Какой заботливый.",
+          "next": "10"
+        },
+        "10": {
+          "speaker": "bruno",
+          "text": "Не надо.",
+          "next": "11"
+        },
+        "11": {
+          "speaker": "richard",
+          "text": "Что?",
+          "next": "12"
+        },
+        "12": {
+          "speaker": "bruno",
+          "text": "Туда... не надо.",
+          "next": "13"
+        },
+        "13": {
+          "speaker": "mordecai",
+          "text": "Он просто хочет помочь.",
+          "next": "14"
+        },
+        "14": {
+          "speaker": "mordecai",
+          "text": "Правда ведь?",
+          "next": "15"
+        },
+        "15": {
+          "speaker": "richard",
+          "text": "",
+          "choices": [
+            {
+              "text": "Просто хочу посмотреть.",
+              "next": "look",
+              "set": {
+                "roof_reply": "look"
+              }
+            },
+            {
+              "text": "Мне нужен доступ на крышу.",
+              "next": "access",
+              "set": {
+                "roof_reply": "access"
+              }
+            }
+          ],
+          "next": "16"
+        },
+        "look": {
+          "speaker": "richard",
+          "text": "Просто хочу посмотреть.",
+          "next": "look_roof"
+        },
+        "look_roof": {
+          "speaker": "mordecai",
+          "text": "На крышу?",
+          "next": "look_yes"
+        },
+        "look_yes": {
+          "speaker": "richard",
+          "text": "Да.",
+          "next": "look_of_course"
+        },
+        "look_of_course": {
+          "speaker": "mordecai",
+          "text": "Конечно.",
+          "next": "look_walter"
+        },
+        "look_walter": {
+          "speaker": "bruno",
+          "text": "Вальтер.",
+          "next": "end"
+        },
+        "access": {
+          "speaker": "richard",
+          "text": "Мне нужен доступ на крышу.",
+          "next": "access_why"
+        },
+        "access_why": {
+          "speaker": "mordecai",
+          "text": "Зачем?",
+          "next": "access_repair"
+        },
+        "access_repair": {
+          "speaker": "richard",
+          "text": "Хочу проверить состояние конструкции.",
+          "next": "access_of_course"
+        },
+        "access_of_course": {
+          "speaker": "mordecai",
+          "text": "А-а. Конечно.",
+          "next": "access_walter"
+        },
+        "access_walter": {
+          "speaker": "mordecai",
+          "text": "Только сначала спроси доктора Вальтера.",
+          "next": "access_pause"
+        },
+        "access_pause": {
+          "speaker": "mordecai",
+          "text": "И...",
+          "next": "access_warning"
+        },
+        "access_warning": {
+          "speaker": "mordecai",
+          "text": "Не прыгай.",
+          "next": "end"
+        }
+      }
+    },
+    "elsa_hall": {
+      "start": "0",
+      "nodes": {
+        "0": {
+          "speaker": "elsa",
+          "text": "Тогда осталось самое сложное.",
+          "next": "1"
+        },
+        "1": {
+          "speaker": "richard",
+          "text": "Доступ на крышу?",
+          "next": "2"
+        },
+        "2": {
+          "speaker": "elsa",
+          "text": "Вальтер.",
+          "next": "3"
+        },
+        "3": {
+          "speaker": "richard",
+          "text": "Где его найти?",
+          "next": "4"
+        },
+        "4": {
+          "speaker": "elsa",
+          "text": "Пыточная.",
+          "next": "5"
+        },
+        "5": {
+          "speaker": "richard",
+          "text": "Почему ты называешь её пыточной?",
+          "next": "6"
+        },
+        "6": {
+          "speaker": "elsa",
+          "text": "А как ещё? Вот, держи.",
+          "next": "7"
+        },
+        "7": {
+          "speaker": "narrator",
+          "text": "Эльза даёт тебе невидимку.",
+          "event": "hairpin_received",
+          "next": "end"
+        }
+      }
+    },
+    "technical": {
+      "start": "0",
+      "nodes": {
+        "0": {
+          "speaker": "narrator",
+          "text": "Технический туннель. Здесь нет афиш. Лампочки периодически мигают.",
+          "event": "technical_begin",
+          "next": "walk"
+        },
+        "1": {
+          "speaker": "narrator",
+          "text": "СТУК.",
+          "event": "knock_front",
+          "pause": 0.7,
+          "next": "2"
+        },
+        "2": {
+          "speaker": "narrator",
+          "text": "Ты оглядываешься. Ничего.",
+          "next": "3"
+        },
+        "3": {
+          "speaker": "narrator",
+          "text": "СТУК. Теперь звук уже позади.",
+          "event": "knock_behind",
+          "pause": 0.7,
+          "next": "4"
+        },
+        "4": {
+          "speaker": "narrator",
+          "text": "В конце туннеля на секунду появляется силуэт Лили. Свет моргает. Её нет.",
+          "event": "lili_silhouette",
+          "pause": 0.6,
+          "next": "end"
+        },
+        "walk": {
+          "speaker": "richard",
+          "text": "",
+          "choices": [
+            {
+              "text": "Идти дальше",
+              "next": "1"
+            },
+            {
+              "text": "Оглянуться",
+              "next": "look_back",
+              "set": {
+                "looked_back": true
+              }
+            }
+          ]
+        },
+        "look_back": {
+          "speaker": "narrator",
+          "text": "Позади никого. Тишина.",
+          "next": "walk"
+        }
+      }
+    },
+    "photos": {
+      "start": "0",
+      "nodes": {
+        "0": {
+          "speaker": "narrator",
+          "text": "Комната неожиданно чистая. На стене фотографии артистов: «ДО» и «ПОСЛЕ».",
+          "next": "1"
+        },
+        "1": {
+          "speaker": "narrator",
+          "text": "Обычный мужчина. Бруно. Эльза. Лили.",
+          "event": "show_photos",
+          "next": "wall"
+        },
+        "2": {
+          "speaker": "narrator",
+          "text": "Последняя фотография закрыта. Ты снимаешь её.",
+          "next": "3"
+        },
+        "3": {
+          "speaker": "narrator",
+          "text": "Под ней — фотография тебя самого. Моложе. Без костюма ведущего. Подпись: РЕБЁНОК.",
+          "event": "richard_photo",
+          "next": "4"
+        },
+        "4": {
+          "speaker": "narrator",
+          "text": "Фотография падает на пол.",
+          "event": "photo_falls",
+          "next": "end"
+        },
+        "wall": {
+          "speaker": "narrator",
+          "text": "Фотографии на стене. Кого ты хочешь рассмотреть?",
+          "choices": [
+            {
+              "text": "Бруно — «ДО / ПОСЛЕ»",
+              "next": "bruno_photo"
+            },
+            {
+              "text": "Эльза — «ДО / ПОСЛЕ»",
+              "next": "elsa_photo"
+            },
+            {
+              "text": "Лили — «ДО / ПОСЛЕ»",
+              "next": "lili_photo"
+            },
+            {
+              "text": "Снять закрытую фотографию",
+              "next": "2"
+            }
+          ]
+        },
+        "bruno_photo": {
+          "speaker": "narrator",
+          "portrait": "bruno",
+          "text": "Бруно. «ДО»: обычный мужчина. «ПОСЛЕ»: силач.",
+          "next": "wall"
+        },
+        "elsa_photo": {
+          "speaker": "narrator",
+          "portrait": "elsa",
+          "text": "Эльза. «ДО» и «ПОСЛЕ». Теперь она всегда в воздухе.",
+          "next": "wall"
+        },
+        "lili_photo": {
+          "speaker": "narrator",
+          "portrait": "lili",
+          "text": "Лили. «ДО» и «ПОСЛЕ». Ты только что говорил с ней.",
+          "next": "wall"
+        }
+      }
+    },
+    "walter_arrival": {
+      "start": "0",
+      "nodes": {
+        "0": {
+          "speaker": "walter",
+          "text": "Не стоит трогать чужие вещи.",
+          "event": "walter_appears",
+          "next": "1"
+        },
+        "1": {
+          "speaker": "walter",
+          "text": "Ричард.",
+          "next": "end"
+        }
+      }
+    }
+  }
+}

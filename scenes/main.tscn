@@ -1,0 +1,141 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_xxr03"]
+[ext_resource type="Script" path="res://scripts/interactable.gd" id="2_ul0mp"]
+[ext_resource type="PackedScene" path="res://scenes/circus_layout.tscn" id="4_o6xl0"]
+[ext_resource type="PackedScene" path="res://scenes/player.tscn" id="4_r8ayd"]
+[ext_resource type="Script" path="res://scripts/hud.gd" id="6_hailm"]
+[ext_resource type="Script" path="res://scripts/player.gd" id="6_tipki"]
+[ext_resource type="PackedScene" path="res://scenes/circus_props.tscn" id="7_props"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_kkwi0"]
+albedo_color = Color(0.7058824, 0.7176471, 0.6784314, 1)
+roughness = 0.85
+
+[sub_resource type="BoxMesh" id="BoxMesh_g3anb"]
+size = Vector3(0.7, 2.4, 0.7)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_cum13"]
+size = Vector3(0.7, 2.4, 0.7)
+
+
+
+
+
+
+
+
+
+
+
+[sub_resource type="Environment" id="Environment_85g3d"]
+background_mode = 1
+background_color = Color(0.065, 0.07, 0.09, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.7, 0.72, 0.8, 1)
+ambient_light_energy = 0.18
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_choun"]
+albedo_color = Color(0.48, 0.48, 0.48, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_ya4ey"]
+size = Vector3(200, 0.2, 220)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_eb6dy"]
+size = Vector3(200, 0.2, 220)
+
+[node name="LastShow" type="Node3D" unique_id=1488756146]
+script = ExtResource("1_xxr03")
+
+[node name="World" type="Node3D" parent="." unique_id=2029708687]
+
+[node name="Mordecai" type="StaticBody3D" parent="World" unique_id=1118204018]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -31.5, 1.2, 41)
+script = ExtResource("2_ul0mp")
+interaction_id = &"mordecai"
+prompt = "Поговорить с Мордекаем"
+
+[node name="Mesh" type="MeshInstance3D" parent="World/Mordecai" unique_id=431602148]
+material_override = SubResource("StandardMaterial3D_kkwi0")
+mesh = SubResource("BoxMesh_g3anb")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="World/Mordecai" unique_id=1281327289]
+shape = SubResource("BoxShape3D_cum13")
+
+
+[node name="CircusLayout" type="Node3D" parent="World" unique_id=141088753 instance=ExtResource("4_o6xl0")]
+
+[node name="CircusProps" type="Node3D" parent="World" instance=ExtResource("7_props")]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="World" unique_id=1747813908]
+environment = SubResource("Environment_85g3d")
+
+[node name="LayoutLight" type="DirectionalLight3D" parent="World" unique_id=576390578]
+transform = Transform3D(0.90630776, 0.34618863, -0.24240388, 0, 0.57357645, 0.81915206, 0.42261827, -0.74240386, 0.5198368, 0, 0, 0)
+light_color = Color(0.95, 0.91, 0.84, 1)
+light_energy = 0.3
+shadow_enabled = true
+directional_shadow_max_distance = 65.0
+
+[node name="Floor" type="StaticBody3D" parent="World" unique_id=268615393]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -42, -0.104, 55)
+
+[node name="Mesh" type="MeshInstance3D" parent="World/Floor" unique_id=1769664481]
+material_override = SubResource("StandardMaterial3D_choun")
+mesh = SubResource("BoxMesh_ya4ey")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="World/Floor" unique_id=1690601966]
+shape = SubResource("BoxShape3D_eb6dy")
+
+
+[node name="Player" type="CharacterBody3D" parent="." unique_id=1836497746 instance=ExtResource("4_r8ayd")]
+transform = Transform3D(0.7869168, 0, 0.6170592, 0, 1, 0, -0.6170592, 0, 0.7869168, -34, 0.05, 38.7)
+script = ExtResource("6_tipki")
+
+[node name="HUD" type="CanvasLayer" parent="." unique_id=1618761318]
+script = ExtResource("6_hailm")
+
+[node name="Bruno" type="StaticBody3D" parent="World"]
+position = Vector3(-16, 1.2, 24)
+script = ExtResource("2_ul0mp")
+interaction_id = &"bruno"
+prompt = "Поговорить с Бруно"
+
+[node name="Mesh" type="MeshInstance3D" parent="World/Bruno"]
+mesh = SubResource("BoxMesh_g3anb")
+material_override = SubResource("StandardMaterial3D_kkwi0")
+scale = Vector3(1.7, 1, 1)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="World/Bruno"]
+shape = SubResource("BoxShape3D_cum13")
+scale = Vector3(1.7, 1, 1)
+
+[node name="Lili" type="StaticBody3D" parent="World"]
+position = Vector3(-22, 1.2, 25)
+script = ExtResource("2_ul0mp")
+interaction_id = &"lili"
+prompt = "Лили"
+
+[node name="Mesh" type="MeshInstance3D" parent="World/Lili"]
+mesh = SubResource("BoxMesh_g3anb")
+material_override = SubResource("StandardMaterial3D_kkwi0")
+scale = Vector3(0.8, 0.75, 0.8)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="World/Lili"]
+shape = SubResource("BoxShape3D_cum13")
+scale = Vector3(0.8, 0.75, 0.8)
+
+[node name="Elsa" type="StaticBody3D" parent="World"]
+position = Vector3(-46, 4.0, 40)
+script = ExtResource("2_ul0mp")
+interaction_id = &"elsa"
+prompt = "Поговорить с Эльзой"
+
+[node name="Mesh" type="MeshInstance3D" parent="World/Elsa"]
+mesh = SubResource("BoxMesh_g3anb")
+material_override = SubResource("StandardMaterial3D_kkwi0")
+scale = Vector3(0.8, 0.85, 0.8)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="World/Elsa"]
+shape = SubResource("BoxShape3D_cum13")
+scale = Vector3(0.8, 0.85, 0.8)

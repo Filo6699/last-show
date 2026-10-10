@@ -1,0 +1,218 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/poison_vial.glb" id="1"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/wax_crayons.glb" id="2"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/makeup_palette.glb" id="3"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/vanity_table.glb" id="4"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/victorian_bed.glb" id="5"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/wardrobe.glb" id="6"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/clown_mask.glb" id="7"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/clown_combat_boots.glb" id="8"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/potato_sacks.glb" id="9"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/training_rack.glb" id="10"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/dartboard_mordecai.glb" id="11"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/broken_chainsaw.glb" id="12"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/lili_memory_chest.glb" id="13"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/full_ashtray.glb" id="14"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/rope_coil.glb" id="15"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/poster_tunnel.glb" id="16"]
+
+[sub_resource type="BoxShape3D" id="shape_vanity_table"]
+size = Vector3(1.7, 1.0, 0.66)
+
+[sub_resource type="BoxShape3D" id="shape_victorian_bed"]
+size = Vector3(1.4, 0.76, 2.2)
+
+[sub_resource type="BoxShape3D" id="shape_wardrobe"]
+size = Vector3(1.65, 2.6, 0.8)
+
+[sub_resource type="BoxShape3D" id="shape_potato_sacks"]
+size = Vector3(1.2, 0.72, 0.8)
+
+[sub_resource type="BoxShape3D" id="shape_training_rack"]
+size = Vector3(2.95, 2.15, 1)
+
+[sub_resource type="BoxShape3D" id="shape_broken_chainsaw"]
+size = Vector3(0.22, 1.65, 0.24)
+
+[sub_resource type="BoxShape3D" id="shape_lili_memory_chest"]
+size = Vector3(1.25, 0.55, 0.78)
+
+[sub_resource type="BoxShape3D" id="tunnel_side"]
+size = Vector3(0.08, 2.20, 9.5)
+
+[sub_resource type="BoxShape3D" id="tunnel_roof"]
+size = Vector3(2.80, 0.10, 9.5)
+
+[node name="CircusProps" type="Node3D"]
+
+[node name="poison_vial" type="Node3D" parent="." instance=ExtResource("1")]
+position = Vector3(-51.4, 1.02, 35.9)
+rotation = Vector3(0, 0, 0)
+
+[node name="wax_crayons" type="Node3D" parent="." instance=ExtResource("2")]
+position = Vector3(-48.3, 1.02, 34.3)
+rotation = Vector3(0, 0, 0)
+
+[node name="makeup_palette" type="Node3D" parent="." instance=ExtResource("3")]
+position = Vector3(-51.0, 1.02, 35.7)
+rotation = Vector3(0, 0, 0)
+
+[node name="vanity_table" type="Node3D" parent="." instance=ExtResource("4")]
+position = Vector3(-51, 0, 35.9)
+rotation = Vector3(0, 0, 0)
+
+[node name="Body" type="StaticBody3D" parent="vanity_table"]
+
+[node name="Shape" type="CollisionShape3D" parent="vanity_table/Body"]
+position = Vector3(0, 0.5, 0)
+shape = SubResource("shape_vanity_table")
+
+[node name="victorian_bed" type="Node3D" parent="." instance=ExtResource("5")]
+position = Vector3(-54.7, 0, 40.0)
+rotation = Vector3(0, 0, 0)
+
+[node name="Body" type="StaticBody3D" parent="victorian_bed"]
+
+[node name="Shape" type="CollisionShape3D" parent="victorian_bed/Body"]
+position = Vector3(0, 0.38, 0)
+shape = SubResource("shape_victorian_bed")
+
+[node name="wardrobe" type="Node3D" parent="." instance=ExtResource("6")]
+position = Vector3(-53.3, 0, 44)
+rotation = Vector3(0, 3.141593, 0)
+
+[node name="Body" type="StaticBody3D" parent="wardrobe"]
+
+[node name="Shape" type="CollisionShape3D" parent="wardrobe/Body"]
+position = Vector3(0, 1.3, 0)
+shape = SubResource("shape_wardrobe")
+
+[node name="clown_mask" type="Node3D" parent="." instance=ExtResource("7")]
+position = Vector3(-49.0, 1.02, 34.3)
+rotation = Vector3(0, 0, 0)
+
+[node name="clown_combat_boots" type="Node3D" parent="." instance=ExtResource("8")]
+position = Vector3(-51.6, 0, 43.3)
+rotation = Vector3(0, 0, 0)
+
+[node name="potato_sacks" type="Node3D" parent="." instance=ExtResource("9")]
+position = Vector3(-36.5, 0, 49.8)
+rotation = Vector3(0, 0, 0)
+
+[node name="Body" type="StaticBody3D" parent="potato_sacks"]
+
+[node name="Shape" type="CollisionShape3D" parent="potato_sacks/Body"]
+position = Vector3(0, 0.36, -0.05)
+shape = SubResource("shape_potato_sacks")
+
+[node name="training_rack" type="Node3D" parent="." instance=ExtResource("10")]
+position = Vector3(-34, 0, 52.7)
+rotation = Vector3(0, 0, 0)
+
+[node name="Body" type="StaticBody3D" parent="training_rack"]
+
+[node name="Shape" type="CollisionShape3D" parent="training_rack/Body"]
+position = Vector3(0, 1.075, 0)
+shape = SubResource("shape_training_rack")
+
+[node name="dartboard_mordecai" type="Node3D" parent="." instance=ExtResource("11")]
+position = Vector3(-45.2, 0, 34.3)
+rotation = Vector3(0, 0, 0)
+
+[node name="broken_chainsaw" type="Node3D" parent="." instance=ExtResource("12")]
+position = Vector3(-42.0, 0, 46.5)
+rotation = Vector3(0, 0, 0)
+
+[node name="Body" type="StaticBody3D" parent="broken_chainsaw"]
+
+[node name="Shape" type="CollisionShape3D" parent="broken_chainsaw/Body"]
+position = Vector3(1, 0.8, -0.3)
+shape = SubResource("shape_broken_chainsaw")
+
+[node name="lili_memory_chest" type="Node3D" parent="." instance=ExtResource("13")]
+position = Vector3(-50, 0, 44.4)
+rotation = Vector3(0, 0, 0)
+
+[node name="Body" type="StaticBody3D" parent="lili_memory_chest"]
+
+[node name="Shape" type="CollisionShape3D" parent="lili_memory_chest/Body"]
+position = Vector3(0, 0.275, 0)
+shape = SubResource("shape_lili_memory_chest")
+
+[node name="full_ashtray" type="Node3D" parent="." instance=ExtResource("14")]
+position = Vector3(-48.0, 1.02, 34.1)
+rotation = Vector3(0, 0, 0)
+
+[node name="rope_coil" type="Node3D" parent="." instance=ExtResource("15")]
+position = Vector3(-39.8, 0, 45.0)
+rotation = Vector3(0, 0, 0)
+
+[node name="poster_tunnel" type="Node3D" parent="." instance=ExtResource("16")]
+position = Vector3(-36.1, 0, 40.9)
+rotation = Vector3(0, -0.818, 0)
+
+[node name="vanity_table_second" type="Node3D" parent="." instance=ExtResource("4")]
+position = Vector3(-48.6, 0, 34.3)
+
+[node name="Body" type="StaticBody3D" parent="vanity_table_second"]
+
+[node name="Shape" type="CollisionShape3D" parent="vanity_table_second/Body"]
+position = Vector3(0, 0.5, 0)
+shape = SubResource("shape_vanity_table")
+
+[node name="rope_coil_00" type="Node3D" parent="." instance=ExtResource("15")]
+position = Vector3(-25.98, 0, -15)
+
+[node name="rope_coil_01" type="Node3D" parent="." instance=ExtResource("15")]
+position = Vector3(0, 0, -30)
+
+[node name="rope_coil_02" type="Node3D" parent="." instance=ExtResource("15")]
+position = Vector3(25.98, 0, -15)
+
+[node name="rope_coil_03" type="Node3D" parent="." instance=ExtResource("15")]
+position = Vector3(25.98, 0, 15)
+
+[node name="rope_coil_04" type="Node3D" parent="." instance=ExtResource("15")]
+position = Vector3(0, 0, 30)
+
+[node name="rope_coil_05" type="Node3D" parent="." instance=ExtResource("15")]
+position = Vector3(-25.98, 0, 15)
+
+[node name="rope_coil_06" type="Node3D" parent="." instance=ExtResource("15")]
+position = Vector3(-27.2, 0, 39)
+
+[node name="rope_coil_07" type="Node3D" parent="." instance=ExtResource("15")]
+position = Vector3(-17.8, 0, 24)
+
+[node name="Body" type="StaticBody3D" parent="poster_tunnel"]
+
+[node name="Left" type="CollisionShape3D" parent="poster_tunnel/Body"]
+position = Vector3(-1.39, 1.1, 0)
+shape = SubResource("tunnel_side")
+
+[node name="Right" type="CollisionShape3D" parent="poster_tunnel/Body"]
+position = Vector3(1.39, 1.1, 0)
+shape = SubResource("tunnel_side")
+
+[node name="Roof" type="CollisionShape3D" parent="poster_tunnel/Body"]
+position = Vector3(0, 3.0, 0)
+shape = SubResource("tunnel_roof")
+
+[node name="BulbLight0" type="OmniLight3D" parent="poster_tunnel"]
+position = Vector3(0, 2.72, -3)
+light_color = Color(1, 0.73, 0.38, 1)
+light_energy = 0.65
+omni_range = 3.6
+
+[node name="BulbLight1" type="OmniLight3D" parent="poster_tunnel"]
+position = Vector3(0, 2.72, 0)
+light_color = Color(1, 0.73, 0.38, 1)
+light_energy = 0.65
+omni_range = 3.6
+
+[node name="BulbLight2" type="OmniLight3D" parent="poster_tunnel"]
+position = Vector3(0, 2.72, 3)
+light_color = Color(1, 0.73, 0.38, 1)
+light_energy = 0.65
+omni_range = 3.6

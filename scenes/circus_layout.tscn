@@ -1,0 +1,7 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://assets/environments/circus_layout_updated.glb" id="1_rrowu"]
+
+[node name="CircusLayout" type="Node3D" unique_id=141088753]
+
+[node name="Model" type="Node3D" parent="." unique_id=864671080 instance=ExtResource("1_rrowu")]
