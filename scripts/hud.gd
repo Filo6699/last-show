@@ -38,7 +38,7 @@ var silhouette_tween: Tween
 var dialogue_scroll: ScrollContainer
 var action_button: Button
 var pause_timer: Timer
-var voice_speed := 42.0
+var voice_speed := 22.0
 var voice_color := Color("b5a185")
 
 func _ready() -> void:
@@ -121,7 +121,8 @@ func _ready() -> void:
 	column.add_child(speaker)
 	words = Label.new()
 	words.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	words.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	words.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	words.visible_characters_behavior = TextServer.VC_CHARS_AFTER_SHAPING
 	words.add_theme_font_size_override("font_size", 27)
 	column.add_child(words)
 	choices = VBoxContainer.new()
@@ -220,7 +221,7 @@ func layout_dialog() -> void:
 
 func show_line(who: String, text: String, image: Texture2D, options: Array, minimum_pause: float = 0) -> void:
 	pause_timer.stop()
-	if text_tween and text_tween.is_running():
+	if text_tween:
 		text_tween.kill()
 	speaker.text = who
 	words.text = text
@@ -257,7 +258,13 @@ func show_line(who: String, text: String, image: Texture2D, options: Array, mini
 	line_ready = minimum_pause <= 0
 	next_button.disabled = not line_ready
 	text_tween = create_tween()
-	text_tween.tween_property(words, "visible_characters", text.length(), maxf(0.01, text.length() / voice_speed))
+	if text.is_empty(): text_tween.tween_interval(.01)
+	# Shape the whole line once; reveal glyphs without re-centering or rewrapping.
+	for index in text.length():
+		text_tween.tween_interval(1.0 / voice_speed)
+		text_tween.tween_callback(words.set.bind("visible_characters", index + 1))
+		if text[index] in [",", ";", ":"]: text_tween.tween_interval(.14)
+		elif text[index] in [".", "!", "?", "…"]: text_tween.tween_interval(.28)
 	layout_dialog.call_deferred()
 	if minimum_pause > 0: pause_timer.start(minimum_pause)
 
@@ -425,12 +432,12 @@ func reset_effects() -> void:
 
 func set_voice(id: String) -> void:
 	var voices := {
-		"mordecai": [Color("ba8771"), 49.0, "Реплика"],
-		"bruno": [Color("a8b4bd"), 24.0, "Слушать"],
-		"elsa": [Color("91b9c9"), 34.0, "Слушать"],
-		"lili": [Color("d1a0b5"), 62.0, "Дальше"],
-		"walter": [Color("a6c0ab"), 37.0, "Слушать"]}
-	var voice: Array = voices.get(id, [Color("c3b79f"), 43.0, "Продолжить"])
+		"mordecai": [Color("ba8771"), 24.0, "Реплика"],
+		"bruno": [Color("a8b4bd"), 18.0, "Слушать"],
+		"elsa": [Color("91b9c9"), 20.0, "Слушать"],
+		"lili": [Color("d1a0b5"), 28.0, "Дальше"],
+		"walter": [Color("a6c0ab"), 21.0, "Слушать"]}
+	var voice: Array = voices.get(id, [Color("c3b79f"), 22.0, "Продолжить"])
 	voice_color = voice[0]
 	voice_speed = voice[1]
 	speaker.add_theme_color_override("font_color", voice_color)
