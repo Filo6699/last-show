@@ -4,6 +4,8 @@ const DATABASE = preload("res://scripts/story_database.gd")
 const INTERACTABLE = preload("res://scripts/interactable.gd")
 const SAVE_PATH := "user://chapter_one.json"
 const SETTINGS_PATH := "user://settings.json"
+# Temporary silent build; keep audio assets and cues for restoring sound later.
+const AUDIO_ENABLED := false
 const VALID_PHASES := ["intro", "news", "to_dressing", "mirror", "elsa_dressing", "to_hall", "lili", "bruno", "elsa_hall", "to_technical", "technical", "photos", "walter", "complete"]
 @onready var world: Node3D = $World
 @onready var model: Node3D = $World/CircusLayout/Model
@@ -34,6 +36,7 @@ var elsa_rope: MeshInstance3D
 var last_safe_position := Vector3(-3, .05, 3)
 
 func _ready() -> void:
+	AudioServer.set_bus_mute(0, not AUDIO_ENABLED)
 	configure_input()
 	if OS.has_feature("mobile"):
 		get_window().size_changed.connect(configure_render_budget)
@@ -74,11 +77,12 @@ func _ready() -> void:
 	hud.touch.move_changed.connect(func(value: Vector2): player.touch_move = value)
 	hud.touch.look_changed.connect(func(value: Vector2): player.look(value * hud.sensitivity))
 	ambience = AudioStreamPlayer.new()
-	ambience.stream = preload("res://assets/audio/ambience.wav")
 	ambience.volume_db = -18
 	add_child(ambience)
-	ambience.finished.connect(ambience.play)
-	ambience.play()
+	if AUDIO_ENABLED:
+		ambience.stream = load("res://assets/audio/ambience.wav")
+		ambience.finished.connect(ambience.play)
+		ambience.play()
 	load_settings()
 	update_staging()
 	player.set_locked(true)
@@ -430,6 +434,7 @@ func shake_camera(strength: float) -> void:
 		camera_tween.tween_property(player.camera, "position", initial + offset, 0.09)
 
 func sound(id: String, pan: float = 0) -> void:
+	if not AUDIO_ENABLED: return
 	var stream: AudioStream = load("res://assets/audio/" + id + ".wav")
 	var playback := AudioStreamPlayer.new()
 	playback.stream = stream
