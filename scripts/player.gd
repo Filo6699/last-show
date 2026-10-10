@@ -77,15 +77,15 @@ func find_focus() -> Object:
 	for group in game.targets.values():
 		for body in group:
 			if not is_instance_valid(body) or body.collision_layer == 0: continue
-			var offset: Vector3 = body.global_position - camera.global_position
-			# Imported colliders have baked vertices; their origin is not the mesh center.
-			if body.get_parent().name == "GeometryCollisions": continue
+			var point: Vector3 = body.to_global(body.get_meta("focus_point", Vector3.ZERO))
+			var offset: Vector3 = point - camera.global_position
 			if offset.length() > 3.8 or offset.length() < .1: continue
 			var score := -camera.global_basis.z.dot(offset.normalized())
 			if score <= best_score: continue
-			var query := PhysicsRayQueryParameters3D.create(camera.global_position, body.global_position, 1, [get_rid()])
+			var query := PhysicsRayQueryParameters3D.create(camera.global_position, point + offset.normalized() * .08, 1, [get_rid()])
 			var hit := get_world_3d().direct_space_state.intersect_ray(query)
-			if hit.get("collider") == body:
+			var blocker: Object = hit.get("collider")
+			if blocker == body or (is_instance_valid(blocker) and blocker.has_method("interact") and blocker.interaction_id == body.interaction_id):
 				best = body
 				best_score = score
 	return best

@@ -1,36 +1,36 @@
 [gd_scene format=3]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/vanity_table.glb" id="0"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/vanity_table.glb" id="0"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/vanity_table.glb" id="1"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/vanity_table.glb" id="1"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/victorian_bed.glb" id="2"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/victorian_bed.glb" id="2"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/wardrobe.glb" id="3"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/wardrobe.glb" id="3"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/clown_mask.glb" id="4"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/clown_mask.glb" id="4"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/clown_combat_boots.glb" id="5"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/clown_combat_boots.glb" id="5"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/poison_vial.glb" id="6"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/poison_vial.glb" id="6"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/wax_crayons.glb" id="7"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/wax_crayons.glb" id="7"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/makeup_palette.glb" id="8"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/makeup_palette.glb" id="8"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/full_ashtray.glb" id="9"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/full_ashtray.glb" id="9"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/lili_memory_chest.glb" id="10"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/lili_memory_chest.glb" id="10"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/training_rack.glb" id="11"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/training_rack.glb" id="11"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/potato_sacks.glb" id="12"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/potato_sacks.glb" id="12"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/broken_chainsaw.glb" id="13"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/broken_chainsaw.glb" id="13"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/dartboard_mordecai.glb" id="14"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/dartboard_mordecai.glb" id="14"]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_props/rope_coil.glb" id="15"]
+[ext_resource type="PackedScene" path="res://assets/environments/circus_props/stylized/rope_coil.glb" id="15"]
 
 [sub_resource type="BoxShape3D" id="vanity_table"]
 

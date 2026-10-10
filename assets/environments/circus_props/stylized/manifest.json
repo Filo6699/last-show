@@ -1,0 +1,77 @@
+[
+  {
+    "id": "broken_chainsaw",
+    "source_triangles": 3911,
+    "triangles": 2530
+  },
+  {
+    "id": "clown_combat_boots",
+    "source_triangles": 4944,
+    "triangles": 1708
+  },
+  {
+    "id": "clown_mask",
+    "source_triangles": 4282,
+    "triangles": 1284
+  },
+  {
+    "id": "dartboard_mordecai",
+    "source_triangles": 4126,
+    "triangles": 2650
+  },
+  {
+    "id": "full_ashtray",
+    "source_triangles": 2944,
+    "triangles": 646
+  },
+  {
+    "id": "lili_memory_chest",
+    "source_triangles": 3878,
+    "triangles": 1744
+  },
+  {
+    "id": "makeup_palette",
+    "source_triangles": 1088,
+    "triangles": 474
+  },
+  {
+    "id": "poison_vial",
+    "source_triangles": 644,
+    "triangles": 282
+  },
+  {
+    "id": "potato_sacks",
+    "source_triangles": 4266,
+    "triangles": 1918
+  },
+  {
+    "id": "rope_coil",
+    "source_triangles": 2096,
+    "triangles": 732
+  },
+  {
+    "id": "training_rack",
+    "source_triangles": 1736,
+    "triangles": 1128
+  },
+  {
+    "id": "vanity_table",
+    "source_triangles": 3568,
+    "triangles": 1604
+  },
+  {
+    "id": "victorian_bed",
+    "source_triangles": 5252,
+    "triangles": 2618
+  },
+  {
+    "id": "wardrobe",
+    "source_triangles": 1128,
+    "triangles": 690
+  },
+  {
+    "id": "wax_crayons",
+    "source_triangles": 832,
+    "triangles": 366
+  }
+]

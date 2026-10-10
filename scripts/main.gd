@@ -80,7 +80,7 @@ func stage_existing_props() -> void:
 	var crate: Node3D = model.get_node_or_null("Crate 2_001")
 	if crate == null: crate = model.get_node_or_null("Crate 2.001")
 	for mesh_name in ["Mirror Frame", "Mirror surface", "Cylinder_009", "Cylinder_008"]:
-		bind_imported(mesh_name, "mirror", "Посмотреть в зеркало")
+		bind_imported(mesh_name, "mirror", "Посмотреть на своё отражение")
 	if crate:
 		bind_imported(String(crate.name), "box", "Открыть коробку для фокусов")
 
@@ -92,6 +92,9 @@ func bind_imported(mesh_name: String, id: String, prompt: String) -> void:
 		if String(body.get_meta("source_mesh", "")) == mesh_name:
 			body.set_script(INTERACTABLE)
 			body.interaction_id = StringName(id)
+			var source := model.find_child(mesh_name, true, false) as MeshInstance3D
+			if source:
+				body.set_meta("focus_point", body.to_local(source.to_global(source.get_aabb().get_center())))
 			body.prompt = prompt
 			body.interacted.connect(on_interact)
 			if not targets.has(id): targets[id] = []
@@ -154,7 +157,16 @@ func on_interact(id: StringName) -> void:
 		"mordecai":
 			if phase == "news": start_dialogue("mordecai_news")
 			elif phase == "bruno": start_dialogue("mordecai_bruno")
-			else: hud.show_notice("Твоя гримёрная за афишами. Дверь уже открыта." if phase == "to_dressing" else "О крыше спроси Бруно. Он у снарядов.")
+			else:
+				var replies := {
+					"to_dressing": "Твоя гримёрная за афишами. Дверь уже открыта.",
+					"mirror": "Ты грим так и не смыл. Зеркала в гримёрной.",
+					"elsa_dressing": "Кажется, Эльза тебя звала. Она в гримёрной.",
+					"to_hall": "Твоя коробка опять стучит. Проверь её, потом поговорим.",
+					"lili": "Твоя коробка опять стучит. Проверь её, потом поговорим.",
+					"elsa_hall": "Эльза у служебной двери. Спроси её о Вальтере.",
+					"to_technical": "Кабинет Вальтера — в конце служебного коридора."}
+				hud.show_notice(replies.get(phase, "Мы уже поговорили, Ричард."))
 		"bruno":
 			start_dialogue("bruno_idle")
 		"mirror":
@@ -163,7 +175,7 @@ func on_interact(id: StringName) -> void:
 		"elsa":
 			if phase == "elsa_dressing": start_dialogue("elsa_dressing")
 			elif phase == "elsa_hall": start_dialogue("elsa_hall")
-			else: hud.show_notice("Я подожду. Сходи к Бруно — он у снарядов." if phase == "to_hall" else "Замок откроется невидимкой. Вальтер в конце коридора.")
+			else: hud.show_notice("Слышишь? В твоей коробке кто-то шуршит. Она посреди манежа." if phase == "to_hall" else "Замок откроется невидимкой. Вальтер в конце коридора.")
 		"dressing":
 			hud.show_notice("Мордекай окликает меня. Сначала выслушаю его.")
 		"hall":
@@ -190,6 +202,7 @@ func check_walk_progress() -> void:
 	if player.is_on_floor(): last_safe_position = p
 	if phase == "to_dressing" and p.x < -11.3:
 		phase = "mirror"
+		hud.show_notice("Смою грим… Постой. Где моё отражение?")
 		update_staging()
 	elif phase == "to_hall" and p.x > -7.6:
 		phase = "lili"
@@ -291,7 +304,8 @@ func update_staging() -> void:
 		var show_actor: bool = (id == "mordecai" and phase not in ["intro", "technical", "photos", "walter", "complete"]) or (id == "bruno" and phase not in ["intro", "technical", "photos", "walter", "complete"]) or (id == "elsa" and phase in ["elsa_dressing", "to_hall", "elsa_hall", "to_technical"]) or (id == "lili" and phase == "lili" and flags.get("lili_visible", false))
 		actors[id].visible = show_actor
 		actors[id].collision_layer = 1 if show_actor else 0
-	actors["mordecai"].position = Vector3(2.2,1.25,-3) if phase in ["bruno", "elsa_hall", "to_technical"] else Vector3(-5.3,1.25,1)
+	actors["mordecai"].position = Vector3(2.2,1.25,-3) if phase in ["lili", "bruno", "elsa_hall", "to_technical"] else Vector3(-5.3,1.25,1)
+	actors["mordecai"].prompt = "Обсудить крышу с Мордекаем" if phase == "bruno" else "Поговорить с Мордекаем"
 	actors["bruno"].position = Vector3(4.5,1.55,-3.7)
 	actors["elsa"].position = Vector3(5.7,2.6,1.4) if phase in ["elsa_hall", "to_technical"] else Vector3(-13.2,2.6,.5)
 	if is_instance_valid(location): location.sync()
@@ -299,11 +313,11 @@ func update_staging() -> void:
 		"intro": ["ПОСЛЕДНЕЕ ПРЕДСТАВЛЕНИЕ", "Номер окончен. Мордекай ждёт за кулисами."],
 		"news": ["ЗА КУЛИСАМИ", "Мордекай хотел что-то сказать."],
 		"to_dressing": ["ЗА КУЛИСАМИ", "Хочу смыть грим. Моя комната за коротким проходом с афишами."],
-		"mirror": ["ГРИМЁРНАЯ", "С отражением что-то не так."],
+		"mirror": ["ГРИМЁРНАЯ", "В зеркалах нет моего отражения. Нужно подойти и присмотреться."],
 		"elsa_dressing": ["ГРИМЁРНАЯ", "Эльза зовёт меня из-под потолка."],
 		"to_hall": ["ГРИМЁРНАЯ", "Эльза сказала про крышу. У коробки в манеже кто-то шуршит."],
 		"lili": ["МАНЕЖ", "Моя коробка для фокусов. Кажется, внутри кто-то есть."],
-		"bruno": ["МАНЕЖ", "Мордекай с Бруно у снарядов. Спрошу о крыше."],
+		"bruno": ["МАНЕЖ", "Мордекай позвал меня к снарядам, где стоит Бруно. Поговорю с Мордекаем."],
 		"elsa_hall": ["МАНЕЖ", "Эльза ждёт у служебной двери."],
 		"to_technical": ["МАНЕЖ", "Невидимкой можно открыть служебный замок."],
 		"technical": ["СЛУЖЕБНЫЙ КОРИДОР", "Вальтер — в комнате в конце коридора."],

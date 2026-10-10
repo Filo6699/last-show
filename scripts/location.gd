@@ -19,6 +19,22 @@ func setup(owner_game: Node3D) -> void:
 		light.shadow_normal_bias = 1.5
 		add_child(light)
 		lamps.append(light)
+	# All visible mirrors support the same story action, including the small vanities.
+	# Thin hit surfaces match their glass and do not block the approach to the table.
+	for x in [-16.3, -12.6]:
+		var target := StaticBody3D.new()
+		target.set_script(preload("res://scripts/interactable.gd"))
+		target.interaction_id = &"mirror"
+		target.prompt = "Посмотреть на своё отражение"
+		target.position = Vector3(x, 1.60, -1.105)
+		add_child(target)
+		var surface := CollisionShape3D.new()
+		var bounds := BoxShape3D.new()
+		bounds.size = Vector3(.65, .90, .08)
+		surface.shape = bounds
+		target.add_child(surface)
+		target.interacted.connect(game.on_interact)
+		game.targets["mirror"].append(target)
 	gate("dressing", Vector3(-8,1.4,2.4), Color("502331"))
 	gate("technical", Vector3(8,1.4,2.4), Color("304641"))
 	# Actual photograph wall, accessible only after walking through the corridor.
