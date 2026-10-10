@@ -1,6 +1,6 @@
 [gd_scene format=3]
 
-[ext_resource type="PackedScene" path="res://assets/environments/circus_layout_updated.glb" id="1_rrowu"]
+[ext_resource type="PackedScene" uid="uid://3pbqmjha4f4r" path="res://assets/environments/chapter_location.glb" id="1_rrowu"]
 
 [node name="CircusLayout" type="Node3D" unique_id=141088753]
 

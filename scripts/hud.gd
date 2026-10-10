@@ -1,4 +1,5 @@
 extends CanvasLayer
+signal interaction_requested
 signal advance_requested
 signal choice_selected(index: int)
 signal menu_action(action: String)
@@ -35,8 +36,18 @@ var silhouette: TextureRect
 var scare_tween: Tween
 var silhouette_tween: Tween
 var dialogue_scroll: ScrollContainer
+var action_button: Button
+var pause_timer: Timer
+var voice_speed := 42.0
+var voice_color := Color("b5a185")
 
 func _ready() -> void:
+	pause_timer = Timer.new()
+	pause_timer.one_shot = true
+	pause_timer.timeout.connect(func():
+		line_ready = true
+		next_button.disabled = false)
+	add_child(pause_timer)
 	root = Control.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -85,6 +96,13 @@ func _ready() -> void:
 	pause_button.size = Vector2(64, 48)
 	pause_button.custom_minimum_size = Vector2(64, 48)
 	root.add_child(pause_button)
+	action_button = make_button("", func(): interaction_requested.emit())
+	action_button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	action_button.position = Vector2(-300,-155)
+	action_button.size = Vector2(270,90)
+	root.add_child(action_button)
+	action_button.hide()
+
 
 	dialog = PanelContainer.new()
 	dialog.add_theme_stylebox_override("panel", panel_style())
@@ -201,6 +219,7 @@ func layout_dialog() -> void:
 		button.custom_minimum_size.y = maxf(60, measured.y + 32)
 
 func show_line(who: String, text: String, image: Texture2D, options: Array, minimum_pause: float = 0) -> void:
+	pause_timer.stop()
 	if text_tween and text_tween.is_running():
 		text_tween.kill()
 	speaker.text = who
@@ -230,6 +249,7 @@ func show_line(who: String, text: String, image: Texture2D, options: Array, mini
 	portrait.texture = image
 	portrait.visible = image != null
 	dialog.show()
+	action_button.hide()
 	hint.hide()
 	crosshair.hide()
 	touch.reset()
@@ -237,14 +257,9 @@ func show_line(who: String, text: String, image: Texture2D, options: Array, mini
 	line_ready = minimum_pause <= 0
 	next_button.disabled = not line_ready
 	text_tween = create_tween()
-	text_tween.tween_property(words, "visible_characters", text.length(), maxf(0.01, text.length() / 45.0))
+	text_tween.tween_property(words, "visible_characters", text.length(), maxf(0.01, text.length() / voice_speed))
 	layout_dialog.call_deferred()
-	if minimum_pause > 0:
-		var displayed_text := text
-		await get_tree().create_timer(minimum_pause).timeout
-		if words.text == displayed_text and dialog.visible:
-			line_ready = true
-			next_button.disabled = false
+	if minimum_pause > 0: pause_timer.start(minimum_pause)
 
 func advance() -> void:
 	if not dialog.visible or not line_ready:
@@ -261,6 +276,7 @@ func select_choice(index: int) -> void:
 		choice_selected.emit(index)
 
 func close_dialog() -> void:
+	pause_timer.stop()
 	if text_tween: text_tween.kill()
 	dialog.hide()
 	portrait.hide()
@@ -269,11 +285,17 @@ func close_dialog() -> void:
 	touch.visible = touch_enabled and not menu.visible
 
 func set_hint(value: String) -> void:
-	hint.text = ("[E]  " if not touch_enabled else "") + value if not value.is_empty() else ""
+	hint.text = "[E]  " + value if not touch_enabled and not value.is_empty() else ""
+	var captions := {"Поговорить с Мордекаем": "Поговорить\nМордекай", "Поговорить с Бруно": "Поговорить\nБруно", "Поговорить с Эльзой": "Поговорить\nЭльза", "Посмотреть в зеркало": "Посмотреть\nв зеркало", "Открыть коробку для фокусов": "Открыть коробку", "Открыть замок невидимкой": "Открыть замок", "Служебная дверь заперта": "Осмотреть дверь", "Гримёрная — Мордекай ждёт ответа": "Открыть гримёрную", "Рассмотреть фотографии": "Фотографии"}
+	action_button.text = captions.get(value, value)
+	action_button.visible = touch_enabled and not value.is_empty() and not dialog.visible and not menu.visible
+
 
 func set_objective(area: String, text: String, has_hairpin: bool = false) -> void:
 	chapter.text = area
 	objective.text = text
+	objective.hide()
+	chapter.hide()
 	item.text = "Невидимка" if has_hairpin else ""
 
 func show_notice(text: String) -> void:
@@ -308,7 +330,15 @@ func show_menu(kind: String, can_continue: bool = false) -> void:
 	if kind != "main":
 		menu_column.add_child(make_button("Главное меню", func(): menu_action.emit("main_menu")))
 	menu_column.add_child(make_button("Выйти", func(): menu_action.emit("quit")))
+	if kind == "pause":
+		var memory := Label.new()
+		memory.text = objective.text
+		memory.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		memory.custom_minimum_size.x = 380
+		memory.add_theme_font_size_override("font_size", 20)
+		menu_column.add_child(memory)
 	menu.show()
+	action_button.hide()
 	touch.reset()
 	touch.hide()
 	hint.hide()
@@ -392,3 +422,21 @@ func reset_effects() -> void:
 	silhouette.hide()
 	notice.text = ""
 	story_caption.text = ""
+
+func set_voice(id: String) -> void:
+	var voices := {
+		"mordecai": [Color("ba8771"), 49.0, "Реплика"],
+		"bruno": [Color("a8b4bd"), 24.0, "Слушать"],
+		"elsa": [Color("91b9c9"), 34.0, "Слушать"],
+		"lili": [Color("d1a0b5"), 62.0, "Дальше"],
+		"walter": [Color("a6c0ab"), 37.0, "Слушать"]}
+	var voice: Array = voices.get(id, [Color("c3b79f"), 43.0, "Продолжить"])
+	voice_color = voice[0]
+	voice_speed = voice[1]
+	speaker.add_theme_color_override("font_color", voice_color)
+	var style := panel_style()
+	style.border_color = voice_color.darkened(.25)
+	style.bg_color = Color("15191d").lerp(voice_color, .07)
+	dialog.add_theme_stylebox_override("panel", style)
+	next_button.text = "Продолжить"
+	words.add_theme_font_override("font", preload("res://assets/fonts/SpecialElite-Regular.ttf") if id == "walter" else preload("res://assets/fonts/DejaVuSerif.ttf"))

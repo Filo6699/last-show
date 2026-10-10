@@ -29,7 +29,7 @@ func _physics_process(delta: float) -> void:
 	else:
 		velocity.y = 0
 	move_and_slide()
-	focus = ray.get_collider() if not locked else null
+	focus = find_focus() if not locked else null
 	if is_instance_valid(focus) and focus.has_method("interact"):
 		focus_changed.emit(focus.prompt)
 	else:
@@ -43,11 +43,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		look(event.relative * mouse_sensitivity)
-	if touch_mode and event is InputEventScreenTouch and event.pressed:
-		# Tap the reticle to use whatever it is aimed at.
-		var screen_size := get_viewport().get_visible_rect().size
-		if event.position.distance_to(screen_size * 0.5) <= minf(screen_size.x, screen_size.y) * 0.18:
-			interact()
 	if event.is_action_pressed("interact"):
 		interact()
 
@@ -71,3 +66,26 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		touch_move = Vector2.ZERO
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+func find_focus() -> Object:
+	var direct: Object = ray.get_collider()
+	if is_instance_valid(direct) and direct.has_method("interact"): return direct
+	# A forgiving cone on phones, with an occlusion ray for every candidate.
+	var best: Object = null
+	var best_score := .90
+	var game := get_parent()
+	for group in game.targets.values():
+		for body in group:
+			if not is_instance_valid(body) or body.collision_layer == 0: continue
+			var offset: Vector3 = body.global_position - camera.global_position
+			# Imported colliders have baked vertices; their origin is not the mesh center.
+			if body.get_parent().name == "GeometryCollisions": continue
+			if offset.length() > 3.8 or offset.length() < .1: continue
+			var score := -camera.global_basis.z.dot(offset.normalized())
+			if score <= best_score: continue
+			var query := PhysicsRayQueryParameters3D.create(camera.global_position, body.global_position, 1, [get_rid()])
+			var hit := get_world_3d().direct_space_state.intersect_ray(query)
+			if hit.get("collider") == body:
+				best = body
+				best_score = score
+	return best

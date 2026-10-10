@@ -18,14 +18,16 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventScreenTouch:
 		if event.pressed:
-			# Leave the center clear for reticle taps.
-			if event.position.distance_to(size * 0.5) <= minf(size.x, size.y) * 0.18:
+			# Reserve only the visible action button and pause button.
+			if event.position.x > size.x-310 and event.position.y > size.y-165:
 				return
-			if event.position.x < size.x * 0.45 and move_index == -1:
+			if event.position.x > size.x-100 and event.position.y < 85:
+				return
+			if event.position.x < size.x * 0.45 and event.position.y > size.y * .35 and move_index == -1:
 				move_index = event.index
 				origin = event.position
 				knob = origin
-			elif event.position.x > size.x * 0.45 and event.position.y < size.y * 0.72 and look_index == -1:
+			elif event.position.x >= size.x * 0.45 and look_index == -1:
 				look_index = event.index
 		else:
 			if event.index == move_index:
