@@ -28,6 +28,8 @@ var actor_tween: Tween
 var camera_tween: Tween
 var mirror_system: Node3D
 var location: Node3D
+var glimpse_node: Node3D
+var glimpse_tween: Tween
 var elsa_rope: MeshInstance3D
 var last_safe_position := Vector3(-3, .05, 3)
 
@@ -107,10 +109,8 @@ func stage_existing_props() -> void:
 	if crate == null: crate = model.get_node_or_null("Crate 2.001")
 	for mesh_name in ["Mirror Frame", "Mirror surface", "Cylinder_009", "Cylinder_008"]:
 		bind_imported(mesh_name, "mirror", "Посмотреть на своё отражение")
-	if crate:
-		bind_imported(String(crate.name), "box", "Открыть коробку для фокусов")
-
-	else:
+	# The trunk is physical scenery: Lili reveals herself when Richard enters the hall.
+	if not crate:
 		push_error("Missing the existing imported magic box")
 
 func bind_imported(mesh_name: String, id: String, prompt: String) -> void:
@@ -201,6 +201,7 @@ func on_interact(id: StringName) -> void:
 			if phase == "mirror": start_dialogue("mirror")
 			else: hud.show_notice("Улыбка в зеркале исчезла.")
 		"elsa":
+			if phase in ["intro", "news", "to_dressing", "mirror"]: return
 			if phase == "elsa_dressing": start_dialogue("elsa_dressing")
 			elif phase == "elsa_hall": start_dialogue("elsa_hall")
 			else: hud.show_notice("Слышишь? В твоей коробке кто-то шуршит. Она посреди манежа." if phase == "to_hall" else "Замок откроется невидимкой. Вальтер в конце коридора.")
@@ -211,9 +212,6 @@ func on_interact(id: StringName) -> void:
 			else: hud.show_notice("Мордекай окликает меня. Сначала выслушаю его.")
 		"hall":
 			pass
-		"box":
-			if phase == "lili": start_dialogue("lili")
-			else: hud.show_notice("RICHARD. Коробка пуста.")
 		"technical":
 			if phase == "to_technical" and flags.get("hairpin", false):
 				flags["service_open"] = true
@@ -236,9 +234,7 @@ func check_walk_progress() -> void:
 		hud.show_notice("Смою грим… Постой. Где моё отражение?")
 		update_staging()
 	elif phase == "to_hall" and p.x > -7.6:
-		phase = "lili"
-		sound("knock")
-		update_staging()
+		begin_lili_reveal()
 	elif phase == "to_technical" and flags.get("service_open",false) and p.x > 8.5:
 		phase = "technical"
 		update_staging()
@@ -249,13 +245,14 @@ func check_walk_progress() -> void:
 		if p.x > 12.5 and not flags.get("knock_behind",false):
 			flags["knock_behind"] = true
 			sound("knock", .8)
-		if p.x > 15 and not flags.get("corridor_scare",false):
-			flags["corridor_scare"] = true
-			show_lili_glimpse()
-			sound("sting")
 		if p.x > 16.4:
 			phase = "photos"
 			update_staging()
+			if not flags.get("corridor_scare", false):
+				flags["corridor_scare"] = true
+				show_lili_glimpse()
+				sound("sting")
+			save_game()
 
 func is_inside_location(p: Vector3) -> bool:
 	return (p.x >= -8 and p.x <= 8 and p.z >= -8 and p.z <= 8) or (p.x >= -18 and p.x <= -11 and p.z >= -2 and p.z <= 6) or (p.x >= -11 and p.x <= 16 and p.z >= 1 and p.z <= 3.8) or (p.x >= 16 and p.x <= 22 and p.z >= -1 and p.z <= 6)
@@ -307,7 +304,6 @@ func finish_dialogue() -> void:
 		"intro":
 			location.stage_show.finish_opening()
 			phase = "news"
-			hud.show_notice("" if not hud.touch_enabled else "Слева — шаг. Справа — взгляд. Наведи взгляд на предмет и коснись белой рамки.")
 		"mordecai_news": phase = "to_dressing"
 		"mirror":
 			mirror_system.end_scene()
@@ -325,8 +321,7 @@ func finish_dialogue() -> void:
 			start_dialogue("photos")
 			return
 		"photos":
-			phase = "walter"
-			start_dialogue("walter_arrival")
+			begin_walter_arrival()
 			return
 		"walter_arrival":
 			phase = "complete"
@@ -340,18 +335,23 @@ func update_staging() -> void:
 	for id in actors:
 		var show_actor: bool = (id == "mordecai" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "bruno" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "elsa" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "lili" and phase == "lili" and flags.get("lili_visible", false)) or (id == "walter" and phase in ["walter","complete"])
 		actors[id].visible = show_actor
-		actors[id].collision_layer = 1 if show_actor else 0
+		var can_interact: bool = show_actor and not (id == "elsa" and phase in ["intro", "news", "to_dressing", "mirror"])
+		actors[id].collision_layer = 1 if can_interact else 0
 	location.move_actor("mordecai", Vector3(2.2,1.25,-3) if phase not in ["intro", "news"] else Vector3(-5.3,1.25,1), 6.0)
 	actors["mordecai"].prompt = "Обсудить крышу с Мордекаем" if phase == "bruno" else "Поговорить с Мордекаем"
 	actors["bruno"].prompt = "Обсудить крышу с Бруно" if phase == "bruno" else "Поговорить с Бруно"
 	actors["bruno"].position = Vector3(4.5,1.55,-3.7)
-	location.move_actor("elsa", Vector3(5.7,2.6,1.4) if phase in ["lili", "bruno", "elsa_hall", "to_technical"] else Vector3(-13.2,2.1 if phase in ["elsa_dressing", "to_hall"] else 2.85,.5), 2.0)
-	actors["walter"].position = Vector3(18,.95,3.8)
+	location.move_actor("elsa", Vector3(5.7,2.6,1.4) if phase in ["lili", "bruno", "elsa_hall", "to_technical"] else Vector3(-13.2,2.1 if phase in ["elsa_dressing", "to_hall"] else 4.8,.5), 2.0)
+	var doctor_position: Array = flags.get("walter_position", [18, .95, 3.8])
+	actors["walter"].position = Vector3(doctor_position[0], doctor_position[1], doctor_position[2])
 	actors["mordecai"].rotation.y = -.35
 	actors["bruno"].rotation.y = -.5
 	actors["lili"].rotation.y = 0
+	if phase == "lili" and flags.get("lili_visible", false) and not flags.get("lili_reveal_pending", false):
+		actors["lili"].position = Vector3(-4.4, 1.2, .3)
+		actors["lili"].look_at(Vector3(player.position.x, actors["lili"].position.y, player.position.z), Vector3.UP, true)
 	actors["elsa"].rotation.y = .25
-	actors["walter"].rotation.y = PI
+	actors["walter"].rotation.y = float(flags.get("walter_yaw", PI))
 	if is_instance_valid(location): location.sync()
 	var notes := {
 		"intro": ["ПОСЛЕДНЕЕ ПРЕДСТАВЛЕНИЕ", "Номер окончен. Мордекай ждёт за кулисами."],
@@ -366,7 +366,7 @@ func update_staging() -> void:
 		"to_technical": ["МАНЕЖ", "Невидимкой можно открыть служебный замок."],
 		"technical": ["СЛУЖЕБНЫЙ КОРИДОР", "Вальтер — в комнате в конце коридора."],
 		"photos": ["КАБИНЕТ", "На дальней стене висят фотографии артистов."],
-		"walter": ["КАБИНЕТ", "За спиной кто-то стоит."],
+		"walter": ["КАБИНЕТ", "Вальтер стоит передо мной."],
 		"complete": ["КОНЕЦ ГЛАВЫ", "Ричард добрался до Вальтера."]}
 	var info: Array = notes[phase]
 	hud.set_objective(info[0], info[1], flags.get("hairpin", false))
@@ -390,14 +390,9 @@ func run_event(event: String) -> void:
 			sound("sting")
 			shake_camera(0.09)
 		"lili_appears":
+			# Legacy saves can still enter node 0 directly; never replay the jump under UI.
 			flags["lili_visible"] = true
-			actors["lili"].position = Vector3(-3, .8, -1.2)
 			update_staging()
-			if actor_tween: actor_tween.kill()
-			actor_tween = create_tween()
-			actor_tween.tween_property(actors["lili"], "position", Vector3(-2.6, 2.5, -1.2), 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-			actor_tween.tween_property(actors["lili"], "position", Vector3(-1.3, 1.2, .3), 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-			sound("knock")
 		"lili_leaves":
 			flags["richard_name_seen"] = true
 			flags["lili_visible"] = false
@@ -536,8 +531,12 @@ func load_game() -> void:
 	if phase == "complete":
 		menu_kind = "end"
 		hud.show_menu("end")
+	elif phase == "lili" and sequence_id.is_empty():
+		begin_lili_reveal()
+	elif phase == "walter" and sequence_id.is_empty():
+		begin_walter_arrival()
 	elif not sequence_id.is_empty(): display_line()
-	player.set_locked(hud.menu.visible or not sequence_id.is_empty())
+	player.set_locked(hud.menu.visible or not sequence_id.is_empty() or transitioning)
 
 func load_settings() -> void:
 	var values = JSON.parse_string(FileAccess.get_file_as_string(SETTINGS_PATH)) if FileAccess.file_exists(SETTINGS_PATH) else {}
@@ -553,6 +552,9 @@ func apply_settings(volume: float, sensitivity: float) -> void:
 	if file: file.store_string(JSON.stringify({"volume": volume, "sensitivity": sensitivity}))
 
 func stop_effects() -> void:
+	if glimpse_tween: glimpse_tween.kill()
+	if is_instance_valid(glimpse_node): glimpse_node.queue_free()
+	glimpse_node = null
 	if is_instance_valid(location): location.reset_motion()
 	if is_instance_valid(mirror_system): mirror_system.end_scene()
 	if actor_tween: actor_tween.kill()
@@ -572,17 +574,144 @@ func _notification(what: int) -> void:
 		if menu_kind != "main" and not transitioning: save_game()
 		on_menu_action("pause")
 
+func frame_player_at(point: Vector3, duration: float) -> void:
+	var direction: Vector3 = point - player.camera.global_position
+	var yaw := atan2(-direction.x, -direction.z)
+	yaw = player.rotation.y + wrapf(yaw - player.rotation.y, -PI, PI)
+	var pitch := atan2(direction.y, Vector2(direction.x, direction.z).length())
+	if camera_tween: camera_tween.kill()
+	camera_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	camera_tween.tween_property(player, "rotation:y", yaw, duration)
+	camera_tween.tween_property(player.camera, "rotation", Vector3(pitch, 0, 0), duration)
+
+func begin_lili_reveal() -> void:
+	if transitioning: return
+	phase = "lili"
+	sequence_id = ""
+	node_id = ""
+	flags["lili_reveal_pending"] = true
+	flags["lili_visible"] = false
+	transitioning = true
+	player.set_locked(true)
+	hud.close_dialog()
+	hud.touch.hide()
+	hud.hint.hide()
+	hud.crosshair.hide()
+	update_staging()
+	save_game()
+	sound("knock")
+	frame_player_at(Vector3(-3.8, 1.45, -.65), .45)
+	var reveal_session := session
+	if actor_tween: actor_tween.kill()
+	actor_tween = create_tween()
+	actor_tween.tween_interval(.5)
+	actor_tween.tween_callback(func():
+		if session != reveal_session: return
+		flags["lili_visible"] = true
+		var actor: Node3D = actors["lili"]
+		actor.position = Vector3(-3, .65, -1.2)
+		actor.visible = true
+		actor.collision_layer = 0
+		actor.look_at(Vector3(player.position.x, actor.position.y, player.position.z), Vector3.UP, true)
+		sound("knock"))
+	actor_tween.tween_property(actors["lili"], "position", Vector3(-3.6, 2.5, -.7), .35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	actor_tween.tween_property(actors["lili"], "position", Vector3(-4.4, 1.2, .3), .4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	actor_tween.tween_interval(.45)
+	actor_tween.tween_callback(func():
+		if session != reveal_session: return
+		flags["lili_reveal_pending"] = false
+		transitioning = false
+		update_staging()
+		start_dialogue("lili"))
+
+func find_clear_appearance_position(distance: float, height: float, radius: float, feet_y: float) -> Vector3:
+	var eye: Vector3 = player.camera.global_position
+	var forward: Vector3 = -player.camera.global_basis.z
+	forward.y = 0
+	if forward.length_squared() < .01: forward = -player.global_basis.z
+	forward = forward.normalized()
+	var excluded: Array[RID] = [player.get_rid(), actors["walter"].get_rid()]
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = radius
+	# Ignore the thin sole/floor contact band while checking the full body footprint.
+	capsule.height = height - .10
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = capsule
+	query.collision_mask = 1
+	query.exclude = excluded
+	query.margin = .025
+	var ray := PhysicsRayQueryParameters3D.new()
+	ray.from = eye
+	ray.collision_mask = 1
+	ray.exclude = excluded
+	var space := get_world_3d().direct_space_state
+	for reach in [distance, 1.05, 2.2, 2.8]:
+		for angle in [0.0, PI/4, -PI/4, PI/2, -PI/2, 3*PI/4, -3*PI/4, PI]:
+			var position: Vector3 = player.position + forward.rotated(Vector3.UP, angle) * reach
+			position.y = feet_y
+			query.transform = Transform3D(Basis.IDENTITY, position + Vector3(0, height/2, 0))
+			if not space.intersect_shape(query, 1).is_empty(): continue
+			ray.to = position + Vector3(0, height * .88, 0)
+			if space.intersect_ray(ray).is_empty(): return position
+	# The clinic has open floor; this last fallback is only for corrupted/outside saves.
+	return Vector3(19, feet_y, 2.4)
+
+func begin_walter_arrival() -> void:
+	phase = "walter"
+	sequence_id = ""
+	node_id = ""
+	transitioning = true
+	player.set_locked(true)
+	hud.close_dialog()
+	hud.touch.hide()
+	hud.hint.hide()
+	hud.crosshair.hide()
+	if not flags.has("walter_position"):
+		var feet := find_clear_appearance_position(1.65, 1.86, .30, .025)
+		var position := feet + Vector3(0, .925, 0)
+		var toward_player: Vector3 = player.position - position
+		flags["walter_position"] = [position.x, position.y, position.z]
+		flags["walter_yaw"] = atan2(toward_player.x, toward_player.z)
+	update_staging()
+	frame_player_at(actors["walter"].global_position + Vector3(0, .72, 0), .3)
+	sound("whisper")
+	save_game()
+	var entrance_session := session
+	if actor_tween: actor_tween.kill()
+	actor_tween = create_tween()
+	actor_tween.tween_interval(.95)
+	actor_tween.tween_callback(func():
+		if session != entrance_session: return
+		transitioning = false
+		start_dialogue("walter_arrival"))
+
 func show_lili_glimpse() -> void:
-	var glimpse: Node3D = load("res://assets/characters/models/lili.glb").instantiate()
-	world.add_child(glimpse)
-	glimpse.position = Vector3(16.2,0,2.4)
-	glimpse.rotation.y = -PI/2
-	for animator in glimpse.find_children("*","AnimationPlayer",true,false):
+	if glimpse_tween: glimpse_tween.kill()
+	if is_instance_valid(glimpse_node): glimpse_node.queue_free()
+	glimpse_node = load("res://assets/characters/models/lili.glb").instantiate()
+	glimpse_node.name = "LiliGlimpse"
+	world.add_child(glimpse_node)
+	# If a wall blocks the viewing axis, choose the nearest clear angle inside the room.
+	# Keep the head at eye level and frame it instead of spawning through that wall.
+	glimpse_node.position = find_clear_appearance_position(1.35, 1.42, .25, maxf(.025, player.camera.global_position.y - 1.25))
+	glimpse_node.look_at(Vector3(player.position.x, glimpse_node.position.y, player.position.z), Vector3.UP, true)
+	frame_player_at(glimpse_node.position + Vector3(0, 1.25, 0), .20)
+	for animator in glimpse_node.find_children("*", "AnimationPlayer", true, false):
 		for clip in animator.get_animation_list():
 			if clip != "RESET":
 				animator.play(clip)
 				break
-	var tween := create_tween()
-	tween.tween_interval(.55)
-	tween.tween_property(glimpse,"position",Vector3(16.2,0,4.4),.35)
-	tween.tween_callback(glimpse.queue_free)
+	var glimpse_session := session
+	var was_transitioning := transitioning
+	transitioning = true
+	player.set_locked(true)
+	hud.touch.hide()
+	glimpse_tween = create_tween()
+	glimpse_tween.tween_interval(.85)
+	glimpse_tween.tween_callback(func():
+		if session != glimpse_session: return
+		if is_instance_valid(glimpse_node): glimpse_node.queue_free()
+		glimpse_node = null
+		transitioning = was_transitioning
+		player.set_locked(hud.menu.visible or not sequence_id.is_empty() or transitioning)
+		hud.touch.visible = hud.touch_enabled and not hud.menu.visible and not hud.dialog.visible)

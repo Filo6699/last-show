@@ -83,7 +83,7 @@ func gate(id: String, at: Vector3, color: Color) -> void:
 	body.set_meta("closed_position", at)
 	add_child(body)
 	var mesh := MeshInstance3D.new()
-	var box := BoxMesh.new();box.size = Vector3(.12,2.8,2.78)
+	var box := BoxMesh.new();box.size = Vector3(.12,2.8,2.60 if id == "technical" else 2.78)
 	mesh.mesh = box
 	var material := StandardMaterial3D.new();material.albedo_color = color;material.roughness = .9
 	mesh.material_override = material;body.add_child(mesh)
@@ -101,9 +101,18 @@ func gate(id: String, at: Vector3, color: Color) -> void:
 	# Brass handle visually explains the action, without a floating marker.
 	var handle := MeshInstance3D.new()
 	var handle_mesh := BoxMesh.new();handle_mesh.size = Vector3(.18,.12,.35)
-	handle.mesh = handle_mesh; handle.position = Vector3(-.1,-.1,.85)
+	handle.mesh = handle_mesh; handle.position = Vector3(-.1,-.1,-.85 if id == "technical" else .85)
 	var brass := StandardMaterial3D.new();brass.albedo_color = Color("bba16c");brass.metallic = .65
 	handle.material_override = brass;body.add_child(handle)
+	if id == "technical":
+		# Hinge at the corridor-side jamb. The entire leaf rotates into +X,
+		# while its thickness stays inside the corridor's z=3.725 inner wall.
+		var hinge_offset := Vector3(.06,0,1.30)
+		body.position = at + hinge_offset
+		body.set_meta("closed_position", body.position)
+		body.set_meta("focus_point", -hinge_offset)
+		for child in body.get_children():
+			if child is Node3D: child.position -= hinge_offset
 	body.interacted.connect(game.on_interact)
 	game.targets[id] = [body]
 	gates[id] = body
@@ -117,9 +126,9 @@ func sync() -> void:
 		var body: StaticBody3D = gates[id]
 		body.visible = true
 		var closed: Vector3 = body.get_meta("closed_position")
-		var target: Vector3 = closed + (Vector3(0,0,-1.25) if id=="dressing" else Vector3(1.35,0,1.28)) if opened else closed
+		var target: Vector3 = closed + Vector3(0,0,-1.25) if opened and id=="dressing" else closed
 		var scale_z := .10 if opened and id=="dressing" else 1.0
-		var angle := PI/2 if opened and id=="technical" else 0.0
+		var angle := -PI/2 if opened and id=="technical" else 0.0
 		if not gate_states.has(id):
 			body.position=target;body.scale.z=scale_z;body.rotation.y=angle;body.collision_layer=0 if opened else 1
 		elif gate_states[id] != opened:

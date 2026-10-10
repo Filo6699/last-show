@@ -329,12 +329,13 @@ func close_dialog() -> void:
 	dialog.hide()
 	portrait.hide()
 	photo_pair.hide()
-	hint.show()
+	hint.hide()
 	crosshair.show()
 	touch.visible = touch_enabled and not menu.visible
 
-func set_hint(value: String) -> void:
-	hint.text = ("" if touch_enabled else "[E]  " + value) if not value.is_empty() else ""
+func set_hint(_value: String) -> void:
+	hint.text = ""
+	hint.hide()
 	action_button.hide()
 
 func set_focus_bounds(bounds: Rect2) -> void:
@@ -432,7 +433,7 @@ func hide_menu() -> void:
 	menu.hide()
 	if not dialog.visible:
 		touch.visible = touch_enabled
-		hint.show()
+		hint.hide()
 		crosshair.show()
 
 func show_settings() -> void:
