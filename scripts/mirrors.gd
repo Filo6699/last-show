@@ -10,6 +10,8 @@ var walk_weight := 0.0
 var previous_position := Vector3.ZERO
 var bone_data := {}
 var active_mirror := -1
+var reflection_clock := 0.0
+const SECONDARY_INTERVAL := 0.10
 var walk_axis := Vector3.RIGHT
 var smile := false
 var cinematic := false
@@ -100,7 +102,7 @@ func add_surface(surface: MeshInstance3D) -> void:
 	material.shader = shader
 	material.set_shader_parameter("reflection",viewport.get_texture())
 	surface.material_override = material
-	mirrors.append({"surface":surface,"viewport":viewport,"camera":camera,"center":center,"normal":normal,"right":right,"up":up,"size":bounds.size})
+	mirrors.append({"surface":surface,"viewport":viewport,"camera":camera,"center":center,"normal":normal,"right":right,"up":up,"size":bounds.size,"last_update":-100.0,"has_image":false})
 
 func _process(delta: float) -> void:
 	if not is_instance_valid(game): return
@@ -117,34 +119,64 @@ func _process(delta: float) -> void:
 		for node in avatar.find_children("*", "MeshInstance3D", true, false):
 			if String(node.name).begins_with("Uncanny"): node.visible = smile
 			if String(node.name).begins_with("NeutralMouth"): node.visible = not smile
-	# One live reflection at display cadence: spend fewer pixels, not fewer frames.
+	reflection_clock += delta
 	var eye: Vector3 = game.player.camera.global_position
+	var visible: Array[int] = []
 	var best := -1
 	var best_score := -1.0
 	for i in mirrors.size():
 		var mirror: Dictionary = mirrors[i]
 		mirror.viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
-		var distance: float = (eye-mirror.center).dot(mirror.normal)
-		if distance <= .10 or eye.distance_to(mirror.center) > 7.0 or not game.player.camera.is_position_in_frustum(mirror.center): continue
+		if not surface_visible(mirror, game.player.camera, 7.5 if i == active_mirror else 7.0): continue
+		visible.append(i)
 		var alignment: float = -game.player.camera.global_basis.z.dot((mirror.center-eye).normalized())
 		var score: float = alignment + (.06 if i == active_mirror else 0.0)
 		if score > best_score:
 			best_score = score; best = i
 	active_mirror = best
+	# The primary reflection stays at display cadence. A peripheral mirror must
+	# not turn matte when focus moves to its neighbour: retain and refresh its image.
+	var secondary := -1
+	var oldest := reflection_clock - SECONDARY_INTERVAL
+	for i in visible:
+		if i != best and mirrors[i].last_update < oldest:
+			oldest = mirrors[i].last_update; secondary = i
 	for i in mirrors.size():
 		var mirror: Dictionary = mirrors[i]
+		if i == best or i == secondary:
+			update_reflection(mirror, eye, restored)
+			mirror.last_update = reflection_clock
+			mirror.has_image = true
 		var material: ShaderMaterial = mirror.surface.material_override
-		material.set_shader_parameter("live", 1.0 if i == best else 0.0)
-		if i != best: continue
-		var distance: float = (eye-mirror.center).dot(mirror.normal)
-		var reflected: Vector3 = eye - 2.0*distance*mirror.normal
-		var camera: Camera3D = mirror.camera
-		camera.global_transform = Transform3D(Basis(-mirror.right,mirror.up,-mirror.normal),reflected)
-		var offset: Vector3 = mirror.center-reflected
-		var near := distance+.015
-		camera.set_frustum(mirror.size.y*near/distance,Vector2(offset.dot(-mirror.right),offset.dot(mirror.up))*near/distance,near,40)
-		camera.cull_mask = 1 | (2 if restored else 0)
-		mirror.viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+		material.set_shader_parameter("live", 1.0 if i in visible and mirror.has_image else 0.0)
+
+func surface_visible(mirror: Dictionary, camera: Camera3D, limit: float) -> bool:
+	var offset: Vector3 = camera.global_position - mirror.center
+	if offset.dot(mirror.normal) <= .02: return false
+	var half_size: Vector2 = mirror.size * .5
+	var nearest: Vector3 = mirror.center + mirror.right * clampf(offset.dot(mirror.right), -half_size.x, half_size.x) + mirror.up * clampf(offset.dot(mirror.up), -half_size.y, half_size.y)
+	if camera.global_position.distance_squared_to(nearest) > limit * limit: return false
+	# Test the full finite glass rectangle, not its centre. A visible edge can
+	# remain on screen when the centre is outside, including close-up views.
+	for plane in camera.get_frustum():
+		var outside := true
+		for x in [-1.0, 1.0]:
+			for y in [-1.0, 1.0]:
+				var corner: Vector3 = mirror.center + mirror.right * half_size.x * x + mirror.up * half_size.y * y
+				if plane.distance_to(corner) <= .01: outside = false
+		if outside: return false
+	return true
+
+func update_reflection(mirror: Dictionary, eye: Vector3, restored: bool) -> void:
+	var distance: float = (eye-mirror.center).dot(mirror.normal)
+	var reflected: Vector3 = eye - 2.0*distance*mirror.normal
+	var camera: Camera3D = mirror.camera
+	camera.global_transform = Transform3D(Basis(-mirror.right,mirror.up,-mirror.normal),reflected)
+	var offset: Vector3 = mirror.center-reflected
+	var near := distance+.015
+	camera.set_frustum(mirror.size.y*near/distance,Vector2(offset.dot(-mirror.right),offset.dot(mirror.up))*near/distance,near,40)
+	camera.cull_mask = 1 | (2 if restored else 0)
+	mirror.viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 func animate_body(delta: float) -> void:
 	var step: Vector3 = game.player.global_position - previous_position
