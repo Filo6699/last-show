@@ -121,20 +121,37 @@ func sync() -> void:
 	gates.technical.prompt = "Открыть замок невидимкой" if game.flags.get("hairpin",false) else "Служебная дверь заперта"
 
 func actor_visual(id: String, actor: Node3D) -> void:
-	# Supplied character illustrations replace anonymous blocking boxes.
-	actor.get_node("Mesh").hide()
-	var sprite := Sprite3D.new()
-	sprite.name = "CharacterArt"
-	sprite.texture = game.database.get_portrait(id)
-	sprite.pixel_size = (3.1 if id == "bruno" else (2.05 if id == "elsa" else 2.5)) / sprite.texture.get_height()
-	sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
-	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-	sprite.no_depth_test = false
-	sprite.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	sprite.shaded = true
-	actor.add_child(sprite)
+	var placeholder := actor.get_node_or_null("Mesh")
+	if placeholder: placeholder.hide()
+	var model: Node3D = load("res://assets/characters/models/"+id+".glb").instantiate()
+	model.name = "CharacterArt"
+	model.position.y = -{"mordecai":1.25,"bruno":1.55,"lili":1.2,"elsa":1.2,"walter":.95}[id]
+	actor.add_child(model)
+	if id == "mordecai":
+		for mouth in model.find_children("NeutralMouth*","MeshInstance3D",true,false): mouth.hide()
+	for animator in model.find_children("*","AnimationPlayer",true,false):
+		for clip in animator.get_animation_list():
+			if clip != "RESET":
+				animator.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
+				animator.play(clip)
+				break
+	var shape := actor.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if shape:
+		shape.scale = Vector3.ONE
+		var capsule := CapsuleShape3D.new()
+		capsule.radius = .40 if id == "bruno" else .27
+		capsule.height = {"bruno":2.30,"lili":1.42,"elsa":1.9,"mordecai":1.8,"walter":1.86}[id]
+		shape.shape = capsule
+		shape.position.y = model.position.y + capsule.height/2
 	if id == "elsa":
+		var rope := MeshInstance3D.new()
+		rope.name = "Suspension"
+		var cylinder := CylinderMesh.new()
+		cylinder.top_radius = .009; cylinder.bottom_radius = .009; cylinder.radial_segments = 6
+		rope.mesh = cylinder
+		var material := StandardMaterial3D.new(); material.albedo_color = Color("63543b")
+		rope.material_override = material
+		actor.add_child(rope)
 		var glow := OmniLight3D.new()
 		glow.light_color = Color("a5c8e1");glow.light_energy = 1.6;glow.omni_range = 4
 		glow.position = Vector3(0,0,1)

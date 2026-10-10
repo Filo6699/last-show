@@ -1,0 +1,38 @@
+[
+  {
+    "id": "richard",
+    "reference": "male.fbx",
+    "triangles": 4744,
+    "height": 1.75
+  },
+  {
+    "id": "mordecai",
+    "reference": "male.fbx",
+    "triangles": 5680,
+    "height": 1.8
+  },
+  {
+    "id": "bruno",
+    "reference": "male.fbx",
+    "triangles": 3924,
+    "height": 2.3
+  },
+  {
+    "id": "elsa",
+    "reference": "female.fbx",
+    "triangles": 4640,
+    "height": 1.7
+  },
+  {
+    "id": "lili",
+    "reference": "female.fbx",
+    "triangles": 4014,
+    "height": 1.42
+  },
+  {
+    "id": "walter",
+    "reference": "male.fbx",
+    "triangles": 4820,
+    "height": 1.86
+  }
+]
