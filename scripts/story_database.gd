@@ -11,13 +11,17 @@ var portraits: Dictionary = {}
 func _init() -> void:
 	var data: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://assets/story/dialogues.json"))
 	sequences = data["sequences"]
-	portraits["mordecai"] = load("res://assets/ui/mordecai_dialogue.png")
+	portraits["mordecai"] = load("res://assets/characters/colored/mordecai.png")
 	portraits["bruno"] = load("res://assets/characters/bruno_dialogue.png")
 	portraits["lili"] = load("res://assets/characters/lili_dialogue.png")
-	portraits["elsa"] = load("res://assets/characters/elsa_dialogue.png")
+	portraits["elsa"] = load("res://assets/characters/colored/elsa.png")
 
 func get_sequence(id: String) -> Dictionary:
 	return sequences.get(id, {})
 
 func get_portrait(id: String) -> Texture2D:
 	return portraits.get(id)
+
+func get_photo(id: String, before: bool) -> Texture2D:
+	var path := "res://assets/story/photos/" + id + ("_before.webp" if before else "_after.webp")
+	return load(path) if ResourceLoader.exists(path) else null

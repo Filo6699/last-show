@@ -56,6 +56,8 @@ func _ready() -> void:
 	mirror_system = preload("res://scripts/mirrors.gd").new()
 	world.add_child(mirror_system)
 	mirror_system.setup(self)
+	var outline := preload("res://scripts/focus_outline.gd").new()
+	add_child(outline);outline.setup(self)
 	hud.interaction_requested.connect(player.interact)
 	hud.advance_requested.connect(advance_dialogue)
 	hud.choice_selected.connect(select_choice)
@@ -117,13 +119,13 @@ func _process(delta: float) -> void:
 	for actor in actors.values():
 		# Real bodies remain in the world; portraits belong only to the dialogue UI.
 		actor.get_node("CharacterArt").visible = true
-	if phase in ["mirror", "elsa_dressing", "to_hall", "elsa_hall", "to_technical"]:
-		actors["elsa"].position.y = 2.6 + sin(Time.get_ticks_msec() / 1400.0) * 0.025
+	if actors["elsa"].visible:
+		pass # Elsa moves through staged tweens; never overwrite her height every frame.
 		var rope: MeshInstance3D = actors["elsa"].get_node("Suspension")
 		var ceiling: float = 3.59 if actors["elsa"].position.x < -11 else 6.8-2.3*absf(actors["elsa"].position.z)/8.0
-		var length: float = maxf(.05,ceiling-actors["elsa"].position.y-.88)
+		var length: float = maxf(.05,ceiling-actors["elsa"].position.y-.75)
 		rope.mesh.height = length
-		rope.position = Vector3(0,.88+length/2,-.12)
+		rope.position = Vector3(0,.75+length/2,0)
 	if not player.locked and not transitioning:
 		check_walk_progress()
 	if not player.locked and not sequence_id.is_empty():
@@ -156,7 +158,7 @@ func new_game() -> void:
 	hud.fade.hide()
 	hud.set_story_mode("")
 	menu_kind = ""
-	place_player(Vector3(-3, 0.05, 3), Vector3(-5.3, 1.4, 1))
+	place_player(Vector3(0, .36, -5.8), Vector3(0, 1.35, 6.6))
 	update_staging()
 	start_dialogue("intro")
 
@@ -178,7 +180,7 @@ func on_interact(id: StringName) -> void:
 			elif phase == "bruno": start_dialogue("mordecai_bruno")
 			else:
 				var replies := {
-					"to_dressing": "Твоя гримёрная за афишами. Дверь уже открыта.",
+					"to_dressing": "Твоя гримёрная за афишами. Занавес не заперт.",
 					"mirror": "Ты грим так и не смыл. Зеркала в гримёрной.",
 					"elsa_dressing": "Кажется, Эльза тебя звала. Она в гримёрной.",
 					"to_hall": "Твоя коробка опять стучит. Проверь её, потом поговорим.",
@@ -187,7 +189,7 @@ func on_interact(id: StringName) -> void:
 					"to_technical": "Кабинет Вальтера — в конце служебного коридора."}
 				hud.show_notice(replies.get(phase, "Мы уже поговорили, Ричард."))
 		"bruno":
-			start_dialogue("bruno_idle")
+			start_dialogue("mordecai_bruno" if phase == "bruno" else "bruno_idle")
 		"mirror":
 			if phase == "mirror": start_dialogue("mirror")
 			else: hud.show_notice("Улыбка в зеркале исчезла.")
@@ -196,7 +198,10 @@ func on_interact(id: StringName) -> void:
 			elif phase == "elsa_hall": start_dialogue("elsa_hall")
 			else: hud.show_notice("Слышишь? В твоей коробке кто-то шуршит. Она посреди манежа." if phase == "to_hall" else "Замок откроется невидимкой. Вальтер в конце коридора.")
 		"dressing":
-			hud.show_notice("Мордекай окликает меня. Сначала выслушаю его.")
+			if phase not in ["intro", "news"]:
+				flags["dressing_open"] = true
+				location.sync();sound("rigging");save_game()
+			else: hud.show_notice("Мордекай окликает меня. Сначала выслушаю его.")
 		"hall":
 			pass
 		"box":
@@ -265,6 +270,9 @@ func display_line() -> void:
 	var portrait_id: String = line.get("portrait", who)
 	hud.set_voice(who)
 	hud.show_line(database.SPEAKERS.get(who, ""), line.get("text", ""), database.get_portrait(portrait_id), line.get("choices", []), float(line.get("pause", 0)))
+	if sequence_id == "photos" and node_id.ends_with("_photo"):
+		var id := node_id.trim_suffix("_photo")
+		hud.show_photo_pair(database.get_photo(id,true), database.get_photo(id,false))
 	run_event(line.get("event", ""))
 	save_game()
 
@@ -290,14 +298,15 @@ func finish_dialogue() -> void:
 	hud.close_dialog()
 	match finished:
 		"intro":
+			location.stage_show.finish_opening()
 			phase = "news"
-			hud.show_notice("" if not hud.touch_enabled else "Слева — шаг. Справа — взгляд. Кнопка действия появится рядом с предметом.")
+			hud.show_notice("" if not hud.touch_enabled else "Слева — шаг. Справа — взгляд. Наведи взгляд на предмет и коснись белой рамки.")
 		"mordecai_news": phase = "to_dressing"
 		"mirror":
 			mirror_system.end_scene()
 			phase = "elsa_dressing"
 			hud.show_notice("Ричард… здесь, у занавеса.")
-			sound("whisper")
+			sound("rigging")
 		"elsa_dressing": phase = "to_hall"
 		"lili": phase = "bruno"
 		"mordecai_bruno": phase = "elsa_hall"
@@ -322,13 +331,14 @@ func finish_dialogue() -> void:
 
 func update_staging() -> void:
 	for id in actors:
-		var show_actor: bool = (id == "mordecai" and phase not in ["intro", "technical", "photos", "walter", "complete"]) or (id == "bruno" and phase not in ["intro", "technical", "photos", "walter", "complete"]) or (id == "elsa" and phase in ["elsa_dressing", "to_hall", "elsa_hall", "to_technical"]) or (id == "lili" and phase == "lili" and flags.get("lili_visible", false)) or (id == "walter" and phase in ["walter","complete"])
+		var show_actor: bool = (id == "mordecai" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "bruno" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "elsa" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "lili" and phase == "lili" and flags.get("lili_visible", false)) or (id == "walter" and phase in ["walter","complete"])
 		actors[id].visible = show_actor
 		actors[id].collision_layer = 1 if show_actor else 0
-	actors["mordecai"].position = Vector3(2.2,1.25,-3) if phase in ["lili", "bruno", "elsa_hall", "to_technical"] else Vector3(-5.3,1.25,1)
+	location.move_actor("mordecai", Vector3(2.2,1.25,-3) if phase not in ["intro", "news"] else Vector3(-5.3,1.25,1), 6.0)
 	actors["mordecai"].prompt = "Обсудить крышу с Мордекаем" if phase == "bruno" else "Поговорить с Мордекаем"
+	actors["bruno"].prompt = "Обсудить крышу с Бруно" if phase == "bruno" else "Поговорить с Бруно"
 	actors["bruno"].position = Vector3(4.5,1.55,-3.7)
-	actors["elsa"].position = Vector3(5.7,2.6,1.4) if phase in ["elsa_hall", "to_technical"] else Vector3(-13.2,2.6,.5)
+	location.move_actor("elsa", Vector3(5.7,2.6,1.4) if phase in ["lili", "bruno", "elsa_hall", "to_technical"] else Vector3(-13.2,2.1 if phase in ["elsa_dressing", "to_hall"] else 2.85,.5), 2.0)
 	actors["walter"].position = Vector3(18,.95,3.8)
 	actors["mordecai"].rotation.y = -.35
 	actors["bruno"].rotation.y = -.5
@@ -344,7 +354,7 @@ func update_staging() -> void:
 		"elsa_dressing": ["ГРИМЁРНАЯ", "Эльза зовёт меня из-под потолка."],
 		"to_hall": ["ГРИМЁРНАЯ", "Эльза сказала про крышу. У коробки в манеже кто-то шуршит."],
 		"lili": ["МАНЕЖ", "Моя коробка для фокусов. Кажется, внутри кто-то есть."],
-		"bruno": ["МАНЕЖ", "Мордекай позвал меня к снарядам, где стоит Бруно. Поговорю с Мордекаем."],
+		"bruno": ["МАНЕЖ", "Мордекай позвал меня к снарядам, где стоит Бруно. Поговорю с ними."],
 		"elsa_hall": ["МАНЕЖ", "Эльза ждёт у служебной двери."],
 		"to_technical": ["МАНЕЖ", "Невидимкой можно открыть служебный замок."],
 		"technical": ["СЛУЖЕБНЫЙ КОРИДОР", "Вальтер — в комнате в конце коридора."],
@@ -356,9 +366,12 @@ func update_staging() -> void:
 
 func run_event(event: String) -> void:
 	match event:
-		"applause": sound("applause")
+		"applause":
+			sound("applause")
+			location.opening_action(flags.get("opening_action", "bow"))
 		"roof_crack":
 			sound("crack")
+			location.roof_crack()
 			shake_camera(0.05)
 		"audience": ambience.volume_db = -26
 		"mirror_empty":
@@ -376,7 +389,7 @@ func run_event(event: String) -> void:
 			if actor_tween: actor_tween.kill()
 			actor_tween = create_tween()
 			actor_tween.tween_property(actors["lili"], "position", Vector3(-2.6, 2.5, -1.2), 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-			actor_tween.tween_property(actors["lili"], "position", Vector3(-2, 1.2, -1.2), 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+			actor_tween.tween_property(actors["lili"], "position", Vector3(-1.3, 1.2, .3), 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 			sound("knock")
 		"lili_leaves":
 			flags["richard_name_seen"] = true
@@ -442,10 +455,12 @@ func on_menu_action(action: String) -> void:
 		"pause":
 			if transitioning or hud.menu.visible: return
 			menu_kind = "pause"
+			location.pause_motion(true)
 			player.set_locked(true)
 			hud.show_menu("pause")
 			save_game()
 		"resume":
+			location.pause_motion(false)
 			hud.hide_menu()
 			menu_kind = ""
 			player.set_locked(not sequence_id.is_empty() or transitioning)
@@ -465,7 +480,7 @@ func on_menu_action(action: String) -> void:
 
 func save_game() -> void:
 	var data := {"version": 1, "phase": phase, "flags": flags, "sequence": sequence_id, "node": node_id,
-		"position": [player.position.x, player.position.y, player.position.z], "yaw": player.rotation.y, "pitch": mirror_system.saved_rotation.get_euler().x if mirror_system.cinematic else player.camera.rotation.x}
+		"position": [player.position.x, player.position.y, player.position.z], "yaw": player.rotation.y, "pitch": mirror_system.saved_rotation.get_euler().x if mirror_system.cinematic else (location.stage_show.neutral_pitch if location.stage_show.view_active else player.camera.rotation.x)}
 	var file := FileAccess.open(save_path, FileAccess.WRITE)
 	if file: file.store_string(JSON.stringify(data))
 
@@ -531,6 +546,7 @@ func apply_settings(volume: float, sensitivity: float) -> void:
 	if file: file.store_string(JSON.stringify({"volume": volume, "sensitivity": sensitivity}))
 
 func stop_effects() -> void:
+	if is_instance_valid(location): location.reset_motion()
 	if is_instance_valid(mirror_system): mirror_system.end_scene()
 	if actor_tween: actor_tween.kill()
 	if camera_tween: camera_tween.kill()

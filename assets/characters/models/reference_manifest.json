@@ -1,0 +1,12 @@
+[
+  {
+    "id": "mordecai",
+    "triangles": 5750,
+    "reference": "mordecai_elsa_color.png"
+  },
+  {
+    "id": "elsa",
+    "triangles": 4854,
+    "reference": "mordecai_elsa_color.png"
+  }
+]

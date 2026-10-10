@@ -3,6 +3,11 @@ extends Node3D
 var game
 var gates: Dictionary = {}
 var lamps: Array[OmniLight3D] = []
+var motion := {}
+var placements := {}
+var gate_motion := {}
+var gate_states := {}
+var stage_show: Node3D
 
 func setup(owner_game: Node3D) -> void:
 	game = owner_game
@@ -50,24 +55,20 @@ func setup(owner_game: Node3D) -> void:
 	photo_target.interacted.connect(game.on_interact)
 	game.targets["photos"] = [photo_target]
 	for i in 3:
-		var frame := MeshInstance3D.new()
-		var quad := QuadMesh.new();quad.size = Vector2(.95,1.35)
-		frame.mesh = quad
-		var material := StandardMaterial3D.new()
-		material.albedo_texture = game.database.get_portrait(["bruno","elsa","lili"][i])
-		material.albedo_color = Color(.9,.9,.82)
-		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-		material.cull_mode = BaseMaterial3D.CULL_DISABLED
-		frame.material_override = material
-		frame.position = Vector3((i-1)*1.35,0,.12)
-		photo_target.add_child(frame)
-		var backing := MeshInstance3D.new()
-		var panel := BoxMesh.new();panel.size = Vector3(1.05,1.45,.06)
-		backing.mesh = panel
-		var paper := StandardMaterial3D.new();paper.albedo_color = Color("b0af98")
-		backing.material_override = paper
-		backing.position = frame.position - Vector3(0,0,.04)
-		photo_target.add_child(backing)
+		var id: String = ["bruno","elsa","lili"][i]
+		for row in 2:
+			var frame := MeshInstance3D.new()
+			var quad := QuadMesh.new();quad.size = Vector2(.86,.86)
+			frame.mesh = quad
+			var material := StandardMaterial3D.new()
+			material.albedo_texture = game.database.get_photo(id,row==0)
+			material.albedo_color = Color(.85,.83,.78) if material.albedo_texture else Color(.18,.17,.16)
+			frame.material_override=material
+			frame.position=Vector3((i-1)*1.35,.55-row*1.02,.12)
+			photo_target.add_child(frame)
+			var caption := Label3D.new();caption.text=("ДО" if row==0 else "ПОСЛЕ")+" · "+game.database.SPEAKERS[id]
+			caption.font_size=32;caption.pixel_size=.003;caption.position=frame.position+Vector3(0,-.48,.015);photo_target.add_child(caption)
+	stage_show=preload("res://scripts/stage_show.gd").new();add_child(stage_show);stage_show.setup(game)
 
 func gate(id: String, at: Vector3, color: Color) -> void:
 	var body := StaticBody3D.new()
@@ -104,21 +105,60 @@ func gate(id: String, at: Vector3, color: Color) -> void:
 	gates[id] = body
 
 func sync() -> void:
-	var dressing_open: bool = game.phase not in ["intro","news"]
+	stage_show.sync_damage()
+	var dressing_open: bool = game.flags.get("dressing_open", game.phase not in ["intro","news","to_dressing"])
 	var technical_open: bool = game.flags.get("service_open", false)
 	for id in gates:
 		var opened: bool = dressing_open if id == "dressing" else technical_open
-		gates[id].visible = true
-		gates[id].collision_layer = 0 if opened else 1
-		var closed: Vector3 = gates[id].get_meta("closed_position")
-		if id == "dressing":
-			gates[id].position = closed + Vector3(0,0,-1.25) if opened else closed
-			gates[id].scale.z = .10 if opened else 1.0
-		else:
-			gates[id].position = closed + Vector3(1.35,0,1.28) if opened else closed
-			gates[id].rotation.y = PI/2 if opened else 0.0
-	gates.dressing.prompt = "Гримёрная — Мордекай ждёт ответа"
+		var body: StaticBody3D = gates[id]
+		body.visible = true
+		var closed: Vector3 = body.get_meta("closed_position")
+		var target: Vector3 = closed + (Vector3(0,0,-1.25) if id=="dressing" else Vector3(1.35,0,1.28)) if opened else closed
+		var scale_z := .10 if opened and id=="dressing" else 1.0
+		var angle := PI/2 if opened and id=="technical" else 0.0
+		if not gate_states.has(id):
+			body.position=target;body.scale.z=scale_z;body.rotation.y=angle;body.collision_layer=0 if opened else 1
+		elif gate_states[id] != opened:
+			if gate_motion.has(id): gate_motion[id].kill()
+			body.collision_layer=1
+			var tween := create_tween().set_parallel(true)
+			tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+			tween.tween_property(body,"position",target,1.0)
+			tween.tween_property(body,"scale:z",scale_z,1.0)
+			tween.tween_property(body,"rotation:y",angle,1.0)
+			tween.chain().tween_callback(func(): body.collision_layer=0 if opened else 1)
+			gate_motion[id]=tween
+		gate_states[id]=opened
+	gates.dressing.prompt = "Отодвинуть занавес" if game.phase not in ["intro","news"] else "Гримёрная — Мордекай ждёт ответа"
 	gates.technical.prompt = "Открыть замок невидимкой" if game.flags.get("hairpin",false) else "Служебная дверь заперта"
+
+func move_actor(id: String, target: Vector3, duration: float) -> void:
+	var actor: Node3D=game.actors[id]
+	if not placements.has(id): actor.position=target
+	elif placements[id] != target:
+		if motion.has(id): motion[id].kill()
+		var tween := create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		if id=="mordecai" and target.x > 0 and actor.position.x < 0:
+			# Walk around the magic trunk, not through it.
+			tween.tween_property(actor,"position",Vector3(-5.3,1.25,-3.2),2.4)
+			tween.tween_property(actor,"position",target,3.6)
+		elif id=="elsa" and actor.position.x < -11 and target.x > 0:
+			# Follow the real doorway instead of flying through the dressing wall.
+			tween.tween_property(actor,"position",Vector3(-13.2,2.1,2.4),1.0)
+			tween.tween_property(actor,"position",Vector3(-7,2.1,2.4),3.5)
+			tween.tween_property(actor,"position",target,5.0)
+		else: tween.tween_property(actor,"position",target,duration)
+		motion[id]=tween
+	placements[id]=target
+
+func reset_motion() -> void:
+	for tween in motion.values(): tween.kill()
+	for tween in gate_motion.values(): tween.kill()
+	motion.clear();placements.clear();gate_motion.clear();gate_states.clear()
+	if is_instance_valid(stage_show): stage_show.reset()
+
+func opening_action(action: String) -> void: stage_show.opening_action(action)
+func roof_crack() -> void: stage_show.roof_crack()
 
 func actor_visual(id: String, actor: Node3D) -> void:
 	var placeholder := actor.get_node_or_null("Mesh")
@@ -127,6 +167,11 @@ func actor_visual(id: String, actor: Node3D) -> void:
 	model.name = "CharacterArt"
 	model.position.y = -{"mordecai":1.25,"bruno":1.55,"lili":1.2,"elsa":1.2,"walter":.95}[id]
 	actor.add_child(model)
+	if id == "elsa":
+		model.scale = Vector3.ONE*.70
+		# Airborne limbs close to the lamp otherwise cover the entire ceiling in
+		# oversized hard shadows; keep the dressing props as shadow casters.
+		for mesh in model.find_children("*","MeshInstance3D",true,false): mesh.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	if id == "mordecai":
 		for mouth in model.find_children("NeutralMouth*","MeshInstance3D",true,false): mouth.hide()
 	for animator in model.find_children("*","AnimationPlayer",true,false):
@@ -139,8 +184,8 @@ func actor_visual(id: String, actor: Node3D) -> void:
 	if shape:
 		shape.scale = Vector3.ONE
 		var capsule := CapsuleShape3D.new()
-		capsule.radius = .40 if id == "bruno" else .27
-		capsule.height = {"bruno":2.30,"lili":1.42,"elsa":1.9,"mordecai":1.8,"walter":1.86}[id]
+		capsule.radius = .70 if id=="mordecai" else (.55 if id=="elsa" else (.40 if id == "bruno" else .27))
+		capsule.height = {"bruno":2.30,"lili":1.42,"elsa":1.9,"mordecai":2.05,"walter":1.86}[id]
 		shape.shape = capsule
 		shape.position.y = model.position.y + capsule.height/2
 	if id == "elsa":
@@ -156,3 +201,10 @@ func actor_visual(id: String, actor: Node3D) -> void:
 		glow.light_color = Color("a5c8e1");glow.light_energy = 1.6;glow.omni_range = 4
 		glow.position = Vector3(0,0,1)
 		actor.add_child(glow)
+
+func pause_motion(value: bool) -> void:
+	for tween in motion.values()+gate_motion.values():
+		if tween and tween.is_valid():
+			if value: tween.pause()
+			else: tween.play()
+	stage_show.pause_motion(value)

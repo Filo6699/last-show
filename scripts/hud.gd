@@ -14,6 +14,7 @@ var item: Label
 var crosshair: Label
 var notice: Label
 var dialog: PanelContainer
+var portrait_backdrop: ColorRect
 var portrait: TextureRect
 var speaker: Label
 var words: Label
@@ -38,6 +39,8 @@ var silhouette_tween: Tween
 var dialogue_scroll: ScrollContainer
 var action_button: Button
 var pause_timer: Timer
+var focus_frame: ReferenceRect
+var photo_pair: HBoxContainer
 var voice_speed := 22.0
 var voice_color := Color("b5a185")
 
@@ -76,7 +79,7 @@ func _ready() -> void:
 	crosshair.offset_top = -20
 	crosshair.offset_bottom = 4
 	hint = label("", Vector2(-380, 30), Vector2(760, 58))
-	hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	hint.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_color_override("font_shadow_color", Color.BLACK)
@@ -104,7 +107,19 @@ func _ready() -> void:
 	action_button.size = Vector2(270,90)
 	root.add_child(action_button)
 	action_button.hide()
-
+	focus_frame = ReferenceRect.new()
+	focus_frame.border_color = Color.WHITE
+	focus_frame.border_width = 2.0
+	focus_frame.editor_only = false
+	focus_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(focus_frame)
+	focus_frame.hide()
+	touch.target_tapped.connect(func(): interaction_requested.emit())
+	photo_pair = HBoxContainer.new()
+	photo_pair.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	photo_pair.add_theme_constant_override("separation", 18)
+	root.add_child(photo_pair)
+	photo_pair.hide()
 
 	dialog = PanelContainer.new()
 	dialog.add_theme_stylebox_override("panel", panel_style())
@@ -132,11 +147,17 @@ func _ready() -> void:
 	column.add_child(choices)
 	next_button = make_button("Продолжить", advance)
 	column.add_child(next_button)
+	portrait_backdrop = ColorRect.new()
+	portrait_backdrop.color = Color(.035, .03, .045, .48)
+	portrait_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(portrait_backdrop)
+	portrait_backdrop.hide()
 	portrait = TextureRect.new()
 	portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(portrait)
+	portrait.visibility_changed.connect(func(): portrait_backdrop.visible = portrait.visible)
 	story_caption = label("", Vector2(-260, -60), Vector2(520, 70))
 	story_caption.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	story_caption.position = Vector2(-260, -170)
@@ -208,10 +229,8 @@ func layout_dialog() -> void:
 		return
 	# Anchored offsets are relative to the anchor; Control.position is not.
 	var hint_width := minf(760, root.size.x - 48)
-	hint.offset_left = -hint_width / 2
-	hint.offset_right = hint_width / 2
-	hint.offset_top = 30
-	hint.offset_bottom = 110
+	hint.size = Vector2(minf(440, root.size.x - 48), 64)
+	hint.position = Vector2((root.size.x - hint.size.x) / 2, root.size.y - 84)
 	notice.offset_left = -hint_width / 2
 	notice.offset_right = hint_width / 2
 	notice.offset_top = 100 if root.size.y >= 600 else 65
@@ -225,8 +244,11 @@ func layout_dialog() -> void:
 	dialog.position = Vector2((root.size.x - width) * 0.5, root.size.y - height - 20)
 	dialog.size = Vector2(width, height)
 	var portrait_height := minf(330, maxf(0, root.size.y - height - 64))
-	portrait.position = Vector2((root.size.x - 400) * 0.5, dialog.position.y - portrait_height - 12)
-	portrait.size = Vector2(400, portrait_height)
+	var portrait_width := minf(320, root.size.x * .27)
+	portrait.position = Vector2(24, dialog.position.y - portrait_height - 12)
+	portrait.size = Vector2(portrait_width, portrait_height)
+	portrait_backdrop.position = portrait.position - Vector2(8, 0)
+	portrait_backdrop.size = portrait.size + Vector2(16, 0)
 	objective.size.x = minf(560, maxf(180, root.size.x - 140))
 	for button in choices.get_children():
 		var text: Label = button.get_node("Text")
@@ -234,6 +256,8 @@ func layout_dialog() -> void:
 		var font := text.get_theme_font("font")
 		var measured := font.get_multiline_string_size(text.text, HORIZONTAL_ALIGNMENT_CENTER, maxf(160, width - 100), text.get_theme_font_size("font_size"))
 		button.custom_minimum_size.y = maxf(60, measured.y + 32)
+
+	layout_photo_pair()
 
 func show_line(who: String, text: String, image: Texture2D, options: Array, minimum_pause: float = 0) -> void:
 	pause_timer.stop()
@@ -263,6 +287,7 @@ func show_line(who: String, text: String, image: Texture2D, options: Array, mini
 		button.add_child(caption)
 		choices.add_child(button)
 	next_button.visible = not showing_choices
+	photo_pair.hide()
 	portrait.texture = image
 	portrait.visible = image != null
 	dialog.show()
@@ -303,16 +328,52 @@ func close_dialog() -> void:
 	if text_tween: text_tween.kill()
 	dialog.hide()
 	portrait.hide()
+	photo_pair.hide()
 	hint.show()
 	crosshair.show()
 	touch.visible = touch_enabled and not menu.visible
 
 func set_hint(value: String) -> void:
-	hint.text = "[E]  " + value if not touch_enabled and not value.is_empty() else ""
-	var captions := {"Обсудить крышу с Мордекаем": "О крыше\nМордекай", "Поговорить с Мордекаем": "Поговорить\nМордекай", "Поговорить с Бруно": "Поговорить\nБруно", "Поговорить с Эльзой": "Поговорить\nЭльза", "Посмотреть на своё отражение": "Посмотреть\nв зеркало", "Открыть коробку для фокусов": "Открыть коробку", "Открыть замок невидимкой": "Открыть замок", "Служебная дверь заперта": "Осмотреть дверь", "Гримёрная — Мордекай ждёт ответа": "Открыть гримёрную", "Рассмотреть фотографии": "Фотографии"}
-	action_button.text = captions.get(value, value)
-	action_button.visible = touch_enabled and not value.is_empty() and not dialog.visible and not menu.visible
+	hint.text = ("Коснись выделенного объекта" if touch_enabled else "[E]  " + value) if not value.is_empty() else ""
+	action_button.hide()
 
+func set_focus_bounds(bounds: Rect2) -> void:
+	var available := bounds.has_area() and not dialog.visible and not menu.visible
+	focus_frame.visible = available
+	touch.target_rect = bounds if available else Rect2()
+	if available:
+		focus_frame.position = bounds.position
+		focus_frame.size = bounds.size
+		var hint_width := minf(440, root.size.x - 48)
+		hint.size = Vector2(hint_width, 64)
+		hint.position = Vector2(
+			clampf(bounds.get_center().x - hint_width / 2, 24, root.size.x - hint_width - 24),
+			minf(bounds.end.y + 12, root.size.y - hint.size.y - 20))
+
+func show_photo_pair(before: Texture2D, after: Texture2D) -> void:
+	portrait.hide()
+	for child in photo_pair.get_children():
+		photo_pair.remove_child(child); child.queue_free()
+	for entry in [["ДО", before], ["ПОСЛЕ", after]]:
+		var column := VBoxContainer.new();column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		photo_pair.add_child(column)
+		var title := Label.new();title.text=entry[0];title.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+		column.add_child(title)
+		var picture := TextureRect.new();picture.texture=entry[1];picture.expand_mode=TextureRect.EXPAND_IGNORE_SIZE;picture.stretch_mode=TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		picture.size_flags_vertical=Control.SIZE_EXPAND_FILL;column.add_child(picture)
+		if entry[1] == null:
+			var missing := Label.new();missing.text="Снимок не сохранился";missing.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER;column.add_child(missing)
+	photo_pair.show()
+	layout_dialog()
+	# Container sizing settles after the dialogue line and its choices update.
+	layout_photo_pair.call_deferred()
+
+func layout_photo_pair() -> void:
+	if not is_instance_valid(photo_pair) or not photo_pair.visible: return
+	var height := maxf(0, dialog.position.y - 32)
+	var width := minf(root.size.x - 40, height * 2 + 18)
+	photo_pair.position = Vector2((root.size.x - width) / 2, 16)
+	photo_pair.size = Vector2(maxf(0, width), height)
 
 func set_objective(area: String, text: String, has_hairpin: bool = false) -> void:
 	chapter.text = area
