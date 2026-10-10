@@ -339,7 +339,7 @@ func set_hint(value: String) -> void:
 
 func set_focus_bounds(bounds: Rect2) -> void:
 	var available := bounds.has_area() and not dialog.visible and not menu.visible
-	focus_frame.visible = available
+	focus_frame.visible = false # Geometry shader highlights the actual object silhouette.
 	touch.target_rect = bounds if available else Rect2()
 	if available:
 		focus_frame.position = bounds.position

@@ -54,6 +54,10 @@ func setup(owner_game: Node3D) -> void:
 		surface.position = Vector3(x,1.60,-1.098)
 		add_child(surface)
 		add_surface(surface)
+		# Hit targets live under Location; expose the actual glass for silhouette selection.
+		for target in game.targets.get("mirror", []):
+			if not target.has_meta("source_mesh") and target.global_position.distance_to(surface.global_position) < .03:
+				target.set_meta("outline_meshes", [surface])
 
 func add_surface(surface: MeshInstance3D) -> void:
 	var faces := surface.mesh.get_faces()
