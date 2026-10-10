@@ -595,6 +595,16 @@
           "next": "end"
         }
       }
+    },
+    "bruno_idle": {
+      "start": "0",
+      "nodes": {
+        "0": {
+          "speaker": "bruno",
+          "text": "...",
+          "next": "end"
+        }
+      }
     }
   }
 }

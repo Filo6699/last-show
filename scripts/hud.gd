@@ -67,22 +67,24 @@ func _ready() -> void:
 	objective = label("", Vector2(24, 58), Vector2(560, 96))
 	objective.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	item = label("", Vector2(-280, 70), Vector2(250, 60))
-	item.anchor_left = 1.0
-	item.anchor_right = 1.0
+	item.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	item.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	crosshair = label("·", Vector2(-6, -20), Vector2(12, 24))
 	crosshair.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	crosshair.position = Vector2(-6, -20)
+	crosshair.offset_left = -6
+	crosshair.offset_right = 6
+	crosshair.offset_top = -20
+	crosshair.offset_bottom = 4
 	hint = label("", Vector2(-380, 30), Vector2(760, 58))
 	hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	hint.position = Vector2(-380, 30)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_color_override("font_shadow_color", Color.BLACK)
 	hint.add_theme_constant_override("shadow_offset_x", 2)
 	hint.add_theme_constant_override("shadow_offset_y", 2)
 	notice = label("", Vector2(-390, 100), Vector2(780, 86))
 	notice.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	notice.position = Vector2(-390, 100)
+	notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	notice.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	notice.add_theme_color_override("font_color", Color("edd4a1"))
@@ -204,6 +206,20 @@ func make_button(text: String, action: Callable) -> Button:
 func layout_dialog() -> void:
 	if not is_instance_valid(dialog):
 		return
+	# Anchored offsets are relative to the anchor; Control.position is not.
+	var hint_width := minf(760, root.size.x - 48)
+	hint.offset_left = -hint_width / 2
+	hint.offset_right = hint_width / 2
+	hint.offset_top = 30
+	hint.offset_bottom = 110
+	notice.offset_left = -hint_width / 2
+	notice.offset_right = hint_width / 2
+	notice.offset_top = 100 if root.size.y >= 600 else 65
+	notice.offset_bottom = minf(root.size.y / 2 - 16, notice.offset_top + 86)
+	item.offset_left = -minf(280, root.size.x - 24)
+	item.offset_right = -24
+	item.offset_top = 80
+	item.offset_bottom = 140
 	var width := minf(1000, root.size.x - 40)
 	var height := minf(370 if showing_choices else 250, root.size.y - 48)
 	dialog.position = Vector2((root.size.x - width) * 0.5, root.size.y - height - 20)

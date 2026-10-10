@@ -156,8 +156,7 @@ func on_interact(id: StringName) -> void:
 			elif phase == "bruno": start_dialogue("mordecai_bruno")
 			else: hud.show_notice("Твоя гримёрная за афишами. Дверь уже открыта." if phase == "to_dressing" else "О крыше спроси Бруно. Он у снарядов.")
 		"bruno":
-			if phase == "bruno": start_dialogue("mordecai_bruno")
-			else: hud.show_notice("Потом, Ричард. Сначала разберись со своими делами.")
+			start_dialogue("bruno_idle")
 		"mirror":
 			if phase == "mirror": start_dialogue("mirror")
 			else: hud.show_notice("Улыбка в зеркале исчезла.")
