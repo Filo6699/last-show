@@ -1,0 +1,2 @@
+Additional sound cues for the roof and home, contract signing, item pickups,
+rope cutting and the jump. Procedural audio synthesis; no external recordings.

@@ -11,7 +11,7 @@ var previous_position := Vector3.ZERO
 var bone_data := {}
 var active_mirror := -1
 var reflection_clock := 0.0
-const SECONDARY_INTERVAL := 0.10
+const INTERACTION_RANGE := 1.8
 var walk_axis := Vector3.RIGHT
 var smile := false
 var cinematic := false
@@ -39,27 +39,43 @@ func setup(owner_game: Node3D) -> void:
 	previous_position = game.player.global_position
 	game.player.camera.cull_mask = 1 | 4
 	add_surface(game.model.find_child("Mirror surface", true, false))
-	# The small mirrors are part of joined vanity meshes. Overlay their exact oval.
-	for x in [-16.3, -12.6]:
-		var surface := MeshInstance3D.new()
-		var vertices := PackedVector3Array([Vector3.ZERO])
-		for i in 24:
-			var angle := TAU * i / 24
-			vertices.append(Vector3(.315*cos(angle), .435*sin(angle), 0))
-		var indices := PackedInt32Array()
-		for i in 24: indices.append_array(PackedInt32Array([0,i+1,(i+1)%24+1]))
-		var arrays := []; arrays.resize(Mesh.ARRAY_MAX)
-		arrays[Mesh.ARRAY_VERTEX] = vertices
-		arrays[Mesh.ARRAY_INDEX] = indices
-		var mesh := ArrayMesh.new(); mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,arrays)
-		surface.mesh = mesh
-		surface.position = Vector3(x,1.60,-1.098)
-		add_child(surface)
-		add_surface(surface)
-		# Hit targets live under Location; expose the actual glass for silhouette selection.
-		for target in game.targets.get("mirror", []):
-			if not target.has_meta("source_mesh") and target.global_position.distance_to(surface.global_position) < .03:
-				target.set_meta("outline_meshes", [surface])
+	# Keep one authored story mirror. The other tables remain useful dressing
+	# furniture, with their glass and oval frame removed rather than hidden behind
+	# additional live reflection viewports.
+	for vanity in game.layout.vanity_meshes(game.model):
+		remove_vanity_mirror(vanity)
+	for target in game.targets.get("mirror",[]):
+		if is_instance_valid(target):target.set_meta("focus_range",INTERACTION_RANGE)
+
+func remove_vanity_mirror(vanity: MeshInstance3D) -> void:
+	var replacement := ArrayMesh.new()
+	for index in vanity.mesh.get_surface_count():
+		var material:Material=vanity.get_active_material(index)
+		if material and material.resource_name.begins_with("Clouded_mirror"):continue
+		var arrays:Array=vanity.mesh.surface_get_arrays(index)
+		if material and material.resource_name.begins_with("Tarnished_brass"):
+			var vertices:PackedVector3Array=arrays[Mesh.ARRAY_VERTEX]
+			var indices:PackedInt32Array=arrays[Mesh.ARRAY_INDEX]
+			if indices.is_empty():
+				for vertex in vertices.size():indices.append(vertex)
+			var kept:=PackedInt32Array()
+			for triangle in range(0,indices.size(),3):
+				var center:Vector3=(vertices[indices[triangle]]+vertices[indices[triangle+1]]+vertices[indices[triangle+2]])/3.0
+				if center.y>1.10 and absf(center.x)<.45 and center.z<-.12:continue
+				kept.append(indices[triangle]);kept.append(indices[triangle+1]);kept.append(indices[triangle+2])
+			arrays[Mesh.ARRAY_INDEX]=kept
+			if kept.is_empty():continue
+		replacement.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,arrays)
+		replacement.surface_set_material(replacement.get_surface_count()-1,material)
+	vanity.mesh=replacement
+	for body in game.model.get_node("GeometryCollisions").get_children():
+		if body.get_meta("source_mesh","")==String(vanity.name):
+			var faces:=replacement.get_faces()
+			var to_body:Transform3D=body.global_transform.affine_inverse()*vanity.global_transform
+			for vertex in faces.size():faces[vertex]=to_body*faces[vertex]
+			var collision:=ConcavePolygonShape3D.new();collision.set_faces(faces);collision.backface_collision=true
+			for shape in body.get_children():
+				if shape is CollisionShape3D:shape.shape=collision
 
 func add_surface(surface: MeshInstance3D) -> void:
 	var faces := surface.mesh.get_faces()
@@ -113,7 +129,8 @@ func _process(delta: float) -> void:
 	avatar.global_position = game.player.global_position
 	animate_body(delta)
 	var restored: bool = game.flags.get("reflection_restored",false) or game.phase not in ["intro","news","to_dressing","mirror"]
-	var grinning: bool = game.sequence_id == "mirror" and game.node_id in ["1","2"]
+	var home_host:bool=game.player.position.x>145 and not game.flags.get("rope_cut",false)
+	var grinning: bool = home_host or (game.sequence_id == "mirror" and game.node_id in ["1","2"])
 	if grinning != smile:
 		smile = grinning
 		for node in avatar.find_children("*", "MeshInstance3D", true, false):
@@ -127,23 +144,17 @@ func _process(delta: float) -> void:
 	for i in mirrors.size():
 		var mirror: Dictionary = mirrors[i]
 		mirror.viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
-		if not surface_visible(mirror, game.player.camera, 7.5 if i == active_mirror else 7.0): continue
+		# One low-resolution viewport, only while the glass is on screen.
+		if not surface_visible(mirror, game.player.camera, 10.0): continue
 		visible.append(i)
 		var alignment: float = -game.player.camera.global_basis.z.dot((mirror.center-eye).normalized())
-		var score: float = alignment + (.06 if i == active_mirror else 0.0)
+		var score: float = alignment + (.01 if i == active_mirror else 0.0)
 		if score > best_score:
 			best_score = score; best = i
 	active_mirror = best
-	# The primary reflection stays at display cadence. A peripheral mirror must
-	# not turn matte when focus moves to its neighbour: retain and refresh its image.
-	var secondary := -1
-	var oldest := reflection_clock - SECONDARY_INTERVAL
-	for i in visible:
-		if i != best and mirrors[i].last_update < oldest:
-			oldest = mirrors[i].last_update; secondary = i
 	for i in mirrors.size():
 		var mirror: Dictionary = mirrors[i]
-		if i == best or i == secondary:
+		if i == best:
 			update_reflection(mirror, eye, restored)
 			mirror.last_update = reflection_clock
 			mirror.has_image = true
@@ -171,6 +182,7 @@ func update_reflection(mirror: Dictionary, eye: Vector3, restored: bool) -> void
 	var distance: float = (eye-mirror.center).dot(mirror.normal)
 	var reflected: Vector3 = eye - 2.0*distance*mirror.normal
 	var camera: Camera3D = mirror.camera
+	camera.environment=game.player.camera.environment
 	camera.global_transform = Transform3D(Basis(-mirror.right,mirror.up,-mirror.normal),reflected)
 	var offset: Vector3 = mirror.center-reflected
 	var near := distance+.015

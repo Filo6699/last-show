@@ -1,0 +1,9 @@
+{
+  "amb_roof_loop": "res://assets/audio/full_game/amb_roof_loop.ogg",
+  "amb_home_loop": "res://assets/audio/full_game/amb_home_loop.ogg",
+  "sfx_contract_sign": "res://assets/audio/full_game/sfx_contract_sign.wav",
+  "sfx_rope_cut": "res://assets/audio/full_game/sfx_rope_cut.wav",
+  "sfx_roof_jump": "res://assets/audio/full_game/sfx_roof_jump.wav",
+  "sfx_key_pickup": "res://assets/audio/full_game/sfx_key_pickup.wav",
+  "sfx_knife_pickup": "res://assets/audio/full_game/sfx_knife_pickup.wav"
+}

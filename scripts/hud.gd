@@ -1,4 +1,9 @@
 extends CanvasLayer
+signal character_revealed(letter: String)
+signal voice_started(id: String)
+signal voice_stopped
+signal ui_sound(back: bool)
+var current_voice := ""
 signal interaction_requested
 signal advance_requested
 signal choice_selected(index: int)
@@ -14,14 +19,18 @@ var item: Label
 var crosshair: Label
 var notice: Label
 var dialog: PanelContainer
-var portrait_backdrop: ColorRect
+var dialog_column: VBoxContainer
+var portrait_stage: Control
 var portrait: TextureRect
+var portrait_tween: Tween
 var speaker: Label
 var words: Label
 var choices: VBoxContainer
 var next_button: Button
 var menu: ColorRect
 var menu_column: VBoxContainer
+var menu_scroll:ScrollContainer
+var main_menu_view
 var fade: ColorRect
 var flash: ColorRect
 var text_tween: Tween
@@ -37,6 +46,7 @@ var silhouette: TextureRect
 var scare_tween: Tween
 var silhouette_tween: Tween
 var dialogue_scroll: ScrollContainer
+var choice_scroll: ScrollContainer
 var action_button: Button
 var pause_timer: Timer
 var focus_frame: ReferenceRect
@@ -44,6 +54,8 @@ var photo_pair: HBoxContainer
 var photo_dialog_style: StyleBox
 var voice_speed := 22.0
 var voice_color := Color("b5a185")
+var ending_title:=""
+var ending_description:=""
 
 func _ready() -> void:
 	pause_timer = Timer.new()
@@ -125,42 +137,49 @@ func _ready() -> void:
 	dialog = PanelContainer.new()
 	dialog.add_theme_stylebox_override("panel", panel_style())
 	root.add_child(dialog)
-	var scroll := ScrollContainer.new()
-	dialogue_scroll = scroll
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	dialog.add_child(scroll)
-	var column := VBoxContainer.new()
-	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.add_theme_constant_override("separation", 12)
-	scroll.add_child(column)
+	dialog_column = VBoxContainer.new()
+	dialog_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	dialog_column.add_theme_constant_override("separation", 6)
+	dialog.add_child(dialog_column)
 	speaker = Label.new()
 	speaker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	speaker.add_theme_color_override("font_color", Color("e2c799"))
-	column.add_child(speaker)
+	speaker.add_theme_font_size_override("font_size", 19)
+	dialog_column.add_child(speaker)
+	# Only the reply scrolls; actions stay at the bottom of the panel.
+	dialogue_scroll = ScrollContainer.new()
+	dialogue_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	dialogue_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	dialog_column.add_child(dialogue_scroll)
 	words = Label.new()
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	words.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	words.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	words.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	words.visible_characters_behavior = TextServer.VC_CHARS_AFTER_SHAPING
-	words.add_theme_font_size_override("font_size", 27)
-	column.add_child(words)
+	words.add_theme_font_size_override("font_size", 21)
+	dialogue_scroll.add_child(words)
+	choice_scroll = ScrollContainer.new()
+	choice_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	dialog_column.add_child(choice_scroll)
 	choices = VBoxContainer.new()
+	choices.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	choices.add_theme_constant_override("separation", 8)
-	column.add_child(choices)
+	choice_scroll.add_child(choices)
 	next_button = make_button("Продолжить", advance)
-	column.add_child(next_button)
-	portrait_backdrop = ColorRect.new()
-	portrait_backdrop.color = Color(.035, .03, .045, .48)
-	portrait_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(portrait_backdrop)
-	portrait_backdrop.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	portrait_backdrop.hide()
+	dialog_column.add_child(next_button)
+	# Clip the legs behind the dialogue, including beyond its side margins.
+	portrait_stage = Control.new()
+	portrait_stage.clip_contents = true
+	portrait_stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(portrait_stage)
+	root.move_child(portrait_stage, dialog.get_index())
 	portrait = TextureRect.new()
 	portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(portrait)
+	portrait_stage.add_child(portrait)
 	portrait.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	portrait.visibility_changed.connect(func(): portrait_backdrop.visible = portrait.visible)
 	story_caption = label("", Vector2(-260, -60), Vector2(520, 70))
 	story_caption.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	story_caption.position = Vector2(-260, -170)
@@ -176,9 +195,16 @@ func _ready() -> void:
 	menu.color = Color(0.025, 0.025, 0.04, 0.94)
 	menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.add_child(menu)
+	main_menu_view = preload("res://scripts/main_menu.gd").new()
+	menu.add_child(main_menu_view)
+	menu_scroll=ScrollContainer.new()
+	menu_scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	menu_scroll.offset_left=20;menu_scroll.offset_top=20;menu_scroll.offset_right=-20;menu_scroll.offset_bottom=-20
+	menu_scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED
+	menu.add_child(menu_scroll)
 	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	menu.add_child(center)
+	center.size_flags_horizontal=Control.SIZE_EXPAND_FILL;center.size_flags_vertical=Control.SIZE_EXPAND_FILL
+	menu_scroll.add_child(center)
 	menu_column = VBoxContainer.new()
 	menu_column.custom_minimum_size.x = 380
 	menu_column.add_theme_constant_override("separation", 13)
@@ -216,7 +242,7 @@ func panel_style() -> StyleBoxFlat:
 	style.bg_color = Color("171822")
 	style.border_color = Color("a98a5e")
 	style.set_border_width_all(2)
-	style.set_content_margin_all(20)
+	style.set_content_margin_all(12)
 	return style
 
 func make_button(text: String, action: Callable) -> Button:
@@ -224,6 +250,7 @@ func make_button(text: String, action: Callable) -> Button:
 	button.text = text
 	button.custom_minimum_size.y = 54
 	button.focus_mode = Control.FOCUS_NONE
+	button.pressed.connect(func(): ui_sound.emit(text in ["Назад","Главное меню"]))
 	button.pressed.connect(action)
 	return button
 
@@ -243,38 +270,79 @@ func layout_dialog() -> void:
 	item.offset_top = 80
 	item.offset_bottom = 140
 	var width := minf(1000, root.size.x - 40)
-	var height := minf(370 if showing_choices else 250, root.size.y - 48)
+	# Keep the same stage and panel between listening, replying and choices.
+	# Otherwise the sprite changes size whenever the protagonist answers.
+	# Keep the dialogue low and shallow so the speaker's face and the scene
+	# remain visible. The small minimum preserves enough room for touch actions
+	# on short landscape screens; the panel stays fixed across speakers and modes.
+	var height := minf(maxf(184, root.size.y * .30), root.size.y - 24)
 	if photo_pair.visible:
 		width = minf(300, root.size.x - 40)
 		height = minf(64, root.size.y - 48)
+	main_menu_view.layout()
 	dialog.position = Vector2((root.size.x - width) * 0.5, root.size.y - height - 20)
 	dialog.size = Vector2(width, height)
-	# Fill the space above the dialogue, preserving the complete character art.
-	var portrait_space := Vector2(maxf(0, root.size.x - 40), maxf(0, dialog.position.y - 24))
-	var portrait_size := portrait_space
-	if portrait.texture != null:
-		var image_size := portrait.texture.get_size()
-		portrait_size = image_size * minf(portrait_space.x / image_size.x, portrait_space.y / image_size.y)
-	# Symmetric offsets keep the portrait centered even during viewport resizing.
-	portrait.offset_left = -portrait_size.x * .5
-	portrait.offset_right = portrait_size.x * .5
-	portrait.offset_top = 12 + (portrait_space.y - portrait_size.y) * .5
-	portrait.offset_bottom = portrait.offset_top + portrait_size.y
-	portrait_backdrop.offset_left = portrait.offset_left - 8
-	portrait_backdrop.offset_right = portrait.offset_right + 8
-	portrait_backdrop.offset_top = portrait.offset_top
-	portrait_backdrop.offset_bottom = portrait.offset_bottom
+	layout_portrait()
 	objective.size.x = minf(560, maxf(180, root.size.x - 140))
+	var choice_height := 54.0
+	# Reserve scrollbar and caption margins before measuring wrapped replies.
+	var caption_width := maxf(1, width - 24 - 24 - choice_scroll.get_v_scroll_bar().get_combined_minimum_size().x)
 	for button in choices.get_children():
 		var text: Label = button.get_node("Text")
-		text.custom_minimum_size.x = maxf(160, width - 100)
 		var font := text.get_theme_font("font")
-		var measured := font.get_multiline_string_size(text.text, HORIZONTAL_ALIGNMENT_CENTER, maxf(160, width - 100), text.get_theme_font_size("font_size"))
-		button.custom_minimum_size.y = maxf(60, measured.y + 32)
+		var measured := font.get_multiline_string_size(text.text, HORIZONTAL_ALIGNMENT_CENTER, caption_width, text.get_theme_font_size("font_size"))
+		choice_height = maxf(choice_height, measured.y + 18)
+	for button in choices.get_children():
+		button.custom_minimum_size.y = choice_height
+	var choices_height := choice_height * current_options.size() + 6 * maxi(0, current_options.size() - 1)
+	var has_body := not words.text.is_empty()
+	if showing_choices and not has_body:
+		# Empty story lines are choice-only beats. Let the choices use the whole
+		# interior so short alternatives such as Sign / Refuse appear together.
+		dialogue_scroll.custom_minimum_size.y = 0
+		choice_scroll.custom_minimum_size.y = 0
+		choice_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	else:
+		choice_scroll.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+		if showing_choices:
+			# Keep two readable lines of story text visible above its choices.
+			var body_min_height := words.get_line_height() * 2.0 + 2.0
+			dialogue_scroll.custom_minimum_size.y = body_min_height
+			var panel_style := dialog.get_theme_stylebox("panel")
+			var panel_insets := panel_style.get_minimum_size().y
+			var column_gaps: float = float(dialog_column.get_theme_constant("separation")) * 2.0
+			var available_choice_height := maxf(0.0, height - panel_insets - speaker.get_combined_minimum_size().y - column_gaps - body_min_height)
+			choice_scroll.custom_minimum_size.y = minf(choices_height, available_choice_height)
+		else:
+			dialogue_scroll.custom_minimum_size.y = 0
+			choice_scroll.custom_minimum_size.y = 0
 
 	layout_photo_pair()
 
-func show_line(who: String, text: String, image: Texture2D, options: Array, minimum_pause: float = 0) -> void:
+func layout_portrait() -> void:
+	# The panel stays in front; the visible silhouette ends at its top edge.
+	portrait_stage.size = Vector2(root.size.x, maxf(0, dialog.position.y + 2))
+	var portrait_space := Vector2(maxf(0, root.size.x - 40), maxf(0, dialog.position.y - 28))
+	var portrait_size := portrait_space
+	var portrait_top := 14.0
+	if portrait.texture != null:
+		var image_size := portrait.texture.get_size()
+		var hip_fraction := float(portrait.texture.get_meta("dialogue_hip_fraction", 1.0))
+		var relative_height := float(portrait.texture.get_meta("dialogue_height", 1.0))
+		var visible_height := portrait_space.y * relative_height
+		var scale_factor := minf(portrait_space.x / image_size.x, visible_height / (image_size.y * hip_fraction))
+		portrait_size = image_size * scale_factor
+		# The hips remain at the panel when width limits scaling on narrow screens.
+		portrait_top = dialog.position.y - portrait_size.y * hip_fraction
+		if hip_fraction >= 1.0:
+			portrait_top = 14 + (portrait_space.y - portrait_size.y) * .5
+	# Symmetric offsets keep the portrait centered even during viewport resizing.
+	portrait.offset_left = -portrait_size.x * .5
+	portrait.offset_right = portrait_size.x * .5
+	portrait.offset_top = portrait_top
+	portrait.offset_bottom = portrait.offset_top + portrait_size.y
+
+func show_line(who: String, text: String, image: Texture2D, options: Array, minimum_pause: float = 0, portrait_mode: String = "speaker") -> void:
 	pause_timer.stop()
 	if text_tween:
 		text_tween.kill()
@@ -282,12 +350,15 @@ func show_line(who: String, text: String, image: Texture2D, options: Array, mini
 		dialog.add_theme_stylebox_override("panel", photo_dialog_style)
 	speaker.show()
 	words.show()
+	dialogue_scroll.visible = not text.is_empty()
 	choices.show()
 	next_button.text = "Продолжить"
 	speaker.text = who
 	words.text = text
 	words.visible_characters = 0
+	words.visible = not text.is_empty()
 	dialogue_scroll.scroll_vertical = 0
+	choice_scroll.scroll_vertical = 0
 	current_options = options
 	showing_choices = not options.is_empty()
 	for old in choices.get_children():
@@ -295,22 +366,24 @@ func show_line(who: String, text: String, image: Texture2D, options: Array, mini
 		old.queue_free()
 	for index in options.size():
 		var button := make_button("", func(): select_choice(index))
+		button.disabled=options[index].get("disabled",false)
 		var caption := Label.new()
 		caption.name = "Text"
 		caption.text = options[index]["text"]
 		caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		caption.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		caption.add_theme_font_size_override("font_size", 19)
 		caption.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		caption.offset_left = 14
-		caption.offset_right = -14
+		caption.offset_left = 12
+		caption.offset_right = -12
 		caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		button.add_child(caption)
 		choices.add_child(button)
+	choice_scroll.visible = showing_choices
 	next_button.visible = not showing_choices
 	photo_pair.hide()
-	portrait.texture = image
-	portrait.visible = image != null
+	show_portrait(image, portrait_mode)
 	dialog.show()
 	action_button.hide()
 	hint.hide()
@@ -324,12 +397,40 @@ func show_line(who: String, text: String, image: Texture2D, options: Array, mini
 	# Shape the whole line once; reveal glyphs without re-centering or rewrapping.
 	for index in text.length():
 		text_tween.tween_interval(1.0 / voice_speed)
-		text_tween.tween_callback(words.set.bind("visible_characters", index + 1))
+		text_tween.tween_callback(reveal_character.bind(index+1,text[index]))
 		if text[index] in [",", ";", ":"]: text_tween.tween_interval(.14)
 		elif text[index] in [".", "!", "?", "…"]: text_tween.tween_interval(.28)
 	layout_dialog()
 	layout_dialog.call_deferred()
 	if minimum_pause > 0: pause_timer.start(minimum_pause)
+
+func show_portrait(image: Texture2D, mode: String) -> void:
+	if portrait_tween: portrait_tween.kill()
+	# Only dialogue context may retain a sprite. An unknown new speaker clears it.
+	if mode != "background" or image != null:
+		var changed := portrait.texture != image
+		portrait.texture = image
+		if changed: portrait.self_modulate = Color.WHITE
+	portrait.visible = portrait.texture != null
+	if not portrait.visible: return
+	var tint := Color(.48, .48, .54) if mode == "background" else Color.WHITE
+	portrait_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	portrait_tween.tween_property(portrait, "self_modulate", tint, .2)
+
+func clear_portrait() -> void:
+	if portrait_tween: portrait_tween.kill()
+	portrait.hide()
+	portrait.texture = null
+	portrait.self_modulate = Color.WHITE
+
+func pause_portrait(value: bool) -> void:
+	if portrait_tween and portrait_tween.is_valid():
+		if value: portrait_tween.pause()
+		else: portrait_tween.play()
+
+func reveal_character(count: int, letter: String) -> void:
+	words.visible_characters=count
+	if not menu.visible: character_revealed.emit(letter)
 
 func advance() -> void:
 	if not dialog.visible or not line_ready:
@@ -337,6 +438,7 @@ func advance() -> void:
 	if words.visible_characters >= 0 and words.visible_characters < words.text.length():
 		if text_tween: text_tween.kill()
 		words.visible_characters = -1
+		voice_stopped.emit()
 		return
 	if not showing_choices:
 		advance_requested.emit()
@@ -346,18 +448,19 @@ func select_choice(index: int) -> void:
 		choice_selected.emit(index)
 
 func close_dialog() -> void:
+	voice_stopped.emit()
 	pause_timer.stop()
 	if text_tween: text_tween.kill()
 	dialog.hide()
-	portrait.hide()
+	clear_portrait()
 	photo_pair.hide()
 	hint.hide()
 	crosshair.show()
 	touch.visible = touch_enabled and not menu.visible
 
-func set_hint(_value: String) -> void:
-	hint.text = ""
-	hint.hide()
+func set_hint(value: String) -> void:
+	hint.text = ("E · " if not touch_enabled else "")+value if not value.is_empty() else ""
+	hint.visible=not value.is_empty() and not menu.visible and not dialog.visible
 	action_button.hide()
 
 func set_focus_bounds(bounds: Rect2) -> void:
@@ -367,19 +470,18 @@ func set_focus_bounds(bounds: Rect2) -> void:
 	if available:
 		focus_frame.position = bounds.position
 		focus_frame.size = bounds.size
-		var hint_width := minf(440, root.size.x - 48)
-		hint.size = Vector2(hint_width, 64)
-		hint.position = Vector2(
-			clampf(bounds.get_center().x - hint_width / 2, 24, root.size.x - hint_width - 24),
-			minf(bounds.end.y + 12, root.size.y - hint.size.y - 20))
+		hint.visible=not hint.text.is_empty()
+	else:hint.hide()
 
-func show_photo_pair(before: Texture2D, after: Texture2D) -> void:
+func show_photo_pair(before: Texture2D, _after: Texture2D = null) -> void:
 	pause_timer.stop()
 	if text_tween: text_tween.kill()
 	line_ready = true
 	speaker.hide()
 	words.hide()
 	choices.hide()
+	dialogue_scroll.hide()
+	choice_scroll.hide()
 	if not dialog.get_theme_stylebox("panel") is StyleBoxEmpty:
 		photo_dialog_style = dialog.get_theme_stylebox("panel")
 	dialog.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
@@ -387,10 +489,11 @@ func show_photo_pair(before: Texture2D, after: Texture2D) -> void:
 	next_button.disabled = false
 	next_button.show()
 	words.visible_characters = -1
-	portrait.hide()
+	clear_portrait()
 	for child in photo_pair.get_children():
 		photo_pair.remove_child(child); child.queue_free()
-	for entry in [["ДО", before], ["ПОСЛЕ", after]]:
+	# Only the original photograph is displayed, including old saved photo nodes.
+	for entry in [["ДО", before]]:
 		var column := VBoxContainer.new();column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		photo_pair.add_child(column)
 		var title := Label.new();title.text=entry[0];title.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
@@ -407,7 +510,7 @@ func show_photo_pair(before: Texture2D, after: Texture2D) -> void:
 func layout_photo_pair() -> void:
 	if not is_instance_valid(photo_pair) or not photo_pair.visible: return
 	var height := maxf(0, dialog.position.y - 32)
-	var width := minf(root.size.x - 40, height * 2 + 18)
+	var width := minf(root.size.x - 40, height)
 	photo_pair.position = Vector2((root.size.x - width) / 2, 16)
 	photo_pair.size = Vector2(maxf(0, width), height)
 
@@ -427,42 +530,60 @@ func show_notice(text: String) -> void:
 	notice_tween.tween_property(notice, "modulate:a", 0.0, 0.5)
 
 func show_menu(kind: String, can_continue: bool = false) -> void:
+	menu_scroll.scroll_vertical=0
 	for child in menu_column.get_children():
 		menu_column.remove_child(child)
 		child.queue_free()
 	var heading := Label.new()
-	heading.text = "LAST SHOW" if kind == "main" else ("До встречи с Вальтером" if kind == "end" else "Пауза")
+	heading.text = "LAST SHOW" if kind == "main" else ((ending_title if not ending_title.is_empty() else "Конец игры") if kind == "end" else "Пауза")
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	heading.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
 	heading.add_theme_font_size_override("font_size", 34)
 	menu_column.add_child(heading)
-	if kind == "end":
-		var detail := Label.new()
-		detail.text = "Ричард добрался до доктора.\nПродолжение истории — за пределами этой главы."
-		detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		detail.add_theme_font_size_override("font_size", 19)
-		menu_column.add_child(detail)
 	if kind == "pause":
-		menu_column.add_child(make_button("Вернуться в игру", func(): menu_action.emit("resume")))
-	elif can_continue:
-		menu_column.add_child(make_button("Продолжить", func(): menu_action.emit("continue")))
-	menu_column.add_child(make_button("Пройти заново" if kind != "main" else "Новая игра", func(): menu_action.emit("new_game")))
-	menu_column.add_child(make_button("Настройки", show_settings))
-	if kind != "main":
+		menu_column.add_child(make_button("Продолжить", func(): menu_action.emit("resume")))
+		menu_column.add_child(make_button("Настройки", show_settings))
 		menu_column.add_child(make_button("Главное меню", func(): menu_action.emit("main_menu")))
-	menu_column.add_child(make_button("Выйти", func(): menu_action.emit("quit")))
-	if kind == "pause":
-		var memory := Label.new()
-		memory.text = objective.text
-		memory.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		memory.custom_minimum_size.x = 380
-		memory.add_theme_font_size_override("font_size", 20)
-		menu_column.add_child(memory)
+	elif kind == "end":
+		var description:=Label.new();description.text=ending_description;description.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
+		description.custom_minimum_size.x=0;menu_column.add_child(description)
+		menu_column.add_child(make_button("Новая игра", func(): menu_action.emit("new_game")))
+		menu_column.add_child(make_button("Концовки", func(): menu_action.emit("endings")))
+		menu_column.add_child(make_button("Главное меню", func(): menu_action.emit("main_menu")))
+	else:
+		if can_continue:
+			menu_column.add_child(make_button("Продолжить", func(): menu_action.emit("continue")))
+		menu_column.add_child(make_button("Новая игра", func(): menu_action.emit("new_game")))
+		menu_column.add_child(make_button("Настройки", show_settings))
+		menu_column.add_child(make_button("Концовки", func(): menu_action.emit("endings")))
+		menu_column.add_child(make_button("Выйти", func(): menu_action.emit("quit")))
+	if kind == "main":
+		var primary := true
+		for child in menu_column.get_children():
+			if child is Button:
+				main_menu_view.style_button(child, primary)
+				primary = false
+	main_menu_view.configure(kind == "main", menu_column, menu_scroll)
+	menu.color = Color(0.025, 0.025, 0.04, .25 if kind == "main" else .94)
 	menu.show()
 	action_button.hide()
 	touch.reset()
 	touch.hide()
 	hint.hide()
 	crosshair.hide()
+
+func show_endings(found:Array,definitions:Dictionary) -> void:
+	main_menu_view.configure(false, menu_column, menu_scroll)
+	menu.color = Color(0.025, 0.025, 0.04, .94)
+	for child in menu_column.get_children():menu_column.remove_child(child);child.queue_free()
+	var title:=Label.new();title.text="Концовки · "+str(found.size())+" / "+str(definitions.size())
+	title.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER;menu_column.add_child(title)
+	for id in definitions:
+		var row:=Label.new();row.text=("✓ "+definitions[id][0]) if found.has(id) else "— Не открыта"
+		row.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;row.custom_minimum_size.x=0
+		menu_column.add_child(row)
+	menu_column.add_child(make_button("Назад",func():menu_action.emit("settings_back")))
+	menu.show()
 
 func hide_menu() -> void:
 	menu.hide()
@@ -472,6 +593,8 @@ func hide_menu() -> void:
 		crosshair.show()
 
 func show_settings() -> void:
+	main_menu_view.configure(false, menu_column, menu_scroll)
+	menu.color = Color(0.025, 0.025, 0.04, .94)
 	for child in menu_column.get_children():
 		menu_column.remove_child(child)
 		child.queue_free()
@@ -544,6 +667,8 @@ func reset_effects() -> void:
 	story_caption.text = ""
 
 func set_voice(id: String) -> void:
+	current_voice=id
+	voice_started.emit(id)
 	var voices := {
 		"mordecai": [Color("ba8771"), 24.0, "Реплика"],
 		"bruno": [Color("a8b4bd"), 18.0, "Слушать"],

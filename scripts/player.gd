@@ -14,7 +14,8 @@ var last_focus_prompt := ""
 func _ready() -> void:
 	touch_mode = DisplayServer.is_touchscreen_available() or "--touch" in OS.get_cmdline_user_args()
 	ray.add_exception(self)
-	focus_query.collision_mask = 1
+	ray.collision_mask=1|16
+	focus_query.collision_mask = 1|16
 	focus_query.exclude = [get_rid()]
 	if not touch_mode and DisplayServer.get_name() != "headless":
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -33,7 +34,13 @@ func _physics_process(delta: float) -> void:
 	else:
 		velocity.y = 0
 	move_and_slide()
-	focus = find_focus() if not locked else null
+	refresh_focus()
+
+func refresh_focus() -> void:
+	if not locked:
+		focus = find_focus()
+	else:
+		focus = null
 	var prompt := ""
 	if is_instance_valid(focus) and focus.has_method("interact"):
 		prompt = focus.prompt
@@ -53,12 +60,20 @@ func _unhandled_input(event: InputEvent) -> void:
 		look(event.relative * mouse_sensitivity)
 	if event.is_action_pressed("interact"):
 		interact()
+		# A world interaction may open a dialog/photo in this same input pass.
+		# Consume E so the parent HUD cannot immediately advance/close that view.
+		get_viewport().set_input_as_handled()
 
 func look(amount: Vector2) -> void:
 	if locked:
 		return
 	rotate_y(-amount.x)
 	camera.rotation.x = clampf(camera.rotation.x - amount.y, -1.35, 1.35)
+	# RayCast3D normally refreshes only on a physics tick. Mouse-look can turn
+	# away from a target between ticks, so refresh selection against the new view
+	# immediately instead of briefly keeping the old outline and prompt.
+	ray.force_raycast_update()
+	refresh_focus()
 
 func interact() -> void:
 	if not locked and is_instance_valid(focus):
@@ -77,7 +92,10 @@ func _notification(what: int) -> void:
 
 func find_focus() -> Object:
 	var direct: Object = ray.get_collider()
-	if is_instance_valid(direct) and direct.has_method("interact"): return direct
+	if is_instance_valid(direct) and direct.has_method("interact"):
+		var direct_range := float(direct.get_meta("focus_range", 3.8))
+		if camera.global_position.distance_squared_to(ray.get_collision_point()) <= direct_range * direct_range:
+			return direct
 	# A forgiving cone on phones, with an occlusion ray for every candidate.
 	var best: Object = null
 	var best_score := .90
@@ -92,7 +110,8 @@ func find_focus() -> Object:
 			var point: Vector3 = body.to_global(body.get_meta("focus_point", Vector3.ZERO))
 			var offset: Vector3 = point - eye
 			var distance_squared := offset.length_squared()
-			if distance_squared > 14.44 or distance_squared < .01: continue
+			var range: float = float(body.get_meta("focus_range",3.8))
+			if distance_squared > range * range or distance_squared < .01: continue
 			var direction := offset / sqrt(distance_squared)
 			var score := forward.dot(direction)
 			if score <= best_score: continue

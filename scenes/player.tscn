@@ -17,6 +17,7 @@ position = Vector3(0, 1.55, 0)
 current = true
 fov = 75.0
 near = 0.05
+far = 140.0
 
 [node name="InteractionRay" type="RayCast3D" parent="Camera"]
 target_position = Vector3(0, 0, -3.8)

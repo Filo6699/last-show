@@ -4,9 +4,9 @@ const DATABASE = preload("res://scripts/story_database.gd")
 const INTERACTABLE = preload("res://scripts/interactable.gd")
 const SAVE_PATH := "user://chapter_one.json"
 const SETTINGS_PATH := "user://settings.json"
-# Temporary silent build; keep audio assets and cues for restoring sound later.
-const AUDIO_ENABLED := false
-const VALID_PHASES := ["intro", "news", "to_dressing", "mirror", "elsa_dressing", "to_hall", "lili", "bruno", "elsa_hall", "to_technical", "technical", "photos", "walter", "complete"]
+const AUDIO_ENABLED := true
+const layout = preload("res://scripts/chapter_layout.gd")
+const VALID_PHASES := ["intro", "news", "to_dressing", "mirror", "elsa_dressing", "to_hall", "lili", "bruno", "elsa_hall", "to_technical", "technical", "photos", "walter", "contract", "roof_key", "return_arena", "roof_access", "roof", "home", "bathroom", "trapped", "captured", "complete"]
 @onready var world: Node3D = $World
 @onready var model: Node3D = $World/CircusLayout/Model
 @onready var player = $Player
@@ -17,25 +17,38 @@ var flags: Dictionary = {}
 var sequence_id := ""
 var node_id := ""
 var line: Dictionary = {}
+var dialogue_portrait := ""
+var scene_timer: Timer
+var mirror_gaze_time := 0.0
+var clinic_photo: Node3D
+var photo_comparison := ""
 var actors: Dictionary = {}
 var targets: Dictionary = {}
 var target_id := ""
 var transitioning := false
+var typing_paused := false
 var session := 0
 var menu_kind := "main"
 var save_path := SAVE_PATH
-var ambience: AudioStreamPlayer
+var audio: Node
 var autosave_elapsed := 0.0
 var actor_tween: Tween
 var camera_tween: Tween
 var mirror_system: Node3D
 var location: Node3D
+var full_game: Node3D
 var glimpse_node: Node3D
 var glimpse_tween: Tween
 var elsa_rope: MeshInstance3D
 var last_safe_position := Vector3(-3, .05, 3)
 
 func _ready() -> void:
+	scene_timer = Timer.new()
+	scene_timer.one_shot = true
+	scene_timer.timeout.connect(func():
+		if not sequence_id.is_empty() and line.get("presentation", "") == "scene":
+			advance_dialogue())
+	add_child(scene_timer)
 	AudioServer.set_bus_mute(0, not AUDIO_ENABLED)
 	configure_input()
 	if OS.has_feature("mobile"):
@@ -66,6 +79,10 @@ func _ready() -> void:
 	mirror_system = preload("res://scripts/mirrors.gd").new()
 	world.add_child(mirror_system)
 	mirror_system.setup(self)
+	full_game=preload("res://scripts/full_game.gd").new()
+	world.add_child(full_game);full_game.setup(self)
+	clinic_photo = preload("res://scripts/clinic_photo_reveal.gd").new()
+	clinic_photo.setup(self)
 	var outline := preload("res://scripts/focus_outline.gd").new()
 	add_child(outline);outline.setup(self)
 	hud.interaction_requested.connect(player.interact)
@@ -76,13 +93,9 @@ func _ready() -> void:
 	player.focus_changed.connect(hud.set_hint)
 	hud.touch.move_changed.connect(func(value: Vector2): player.touch_move = value)
 	hud.touch.look_changed.connect(func(value: Vector2): player.look(value * hud.sensitivity))
-	ambience = AudioStreamPlayer.new()
-	ambience.volume_db = -18
-	add_child(ambience)
-	if AUDIO_ENABLED:
-		ambience.stream = load("res://assets/audio/ambience.wav")
-		ambience.finished.connect(ambience.play)
-		ambience.play()
+	audio = preload("res://scripts/chapter_audio.gd").new()
+	add_child(audio)
+	audio.setup(self)
 	load_settings()
 	update_staging()
 	player.set_locked(true)
@@ -107,13 +120,13 @@ func configure_input() -> void:
 			InputMap.action_add_event(action, event)
 
 func stage_existing_props() -> void:
-	# Relocate the artist's existing mirror and luggage into the story rooms.
-	# Its imported collision has baked coordinates, so it receives the same delta.
-	var crate: Node3D = model.get_node_or_null("Crate 2_001")
-	if crate == null: crate = model.get_node_or_null("Crate 2.001")
+	# Bind the source props at their authored positions; never relocate the meshes.
+	var crate: Node3D = model.find_child("StoryTrunk",true,false)
+	if crate == null: crate = model.find_child("Crate 2.001",true,false)
+	if crate:crate.set_meta("dynamic_set",true)
 	for mesh_name in ["Mirror Frame", "Mirror surface", "Cylinder_009", "Cylinder_008"]:
 		bind_imported(mesh_name, "mirror", "Посмотреть на своё отражение")
-	# The trunk is physical scenery: Lili reveals herself when Richard enters the hall.
+	# The trunk stays in the arena centre; approaching it triggers Lili's reveal.
 	if not crate:
 		push_error("Missing the existing imported magic box")
 
@@ -132,13 +145,14 @@ func bind_imported(mesh_name: String, id: String, prompt: String) -> void:
 
 func _process(delta: float) -> void:
 	if actors["elsa"].visible:
-		var ceiling: float = 3.59 if actors["elsa"].position.x < -11 else 6.8-2.3*absf(actors["elsa"].position.z)/8.0
+		var ceiling: float = 8.0 if room_at(actors["elsa"].position)=="dressing" else 20.0
 		var length: float = maxf(.05,ceiling-actors["elsa"].position.y-.75)
 		# Keep the authored cylinder; stretch its instance instead of rebuilding mesh buffers.
 		elsa_rope.scale.y = length / elsa_rope.mesh.height
 		elsa_rope.position = Vector3(0,.75+length/2,0)
 	if not player.locked and not transitioning:
 		check_walk_progress()
+		check_mirror_gaze(delta)
 	if not player.locked and not sequence_id.is_empty():
 		player.set_locked(true)
 	autosave_elapsed += delta
@@ -152,6 +166,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif hud.dialog.visible and not hud.menu.visible and event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode in [KEY_SPACE, KEY_ENTER, KEY_E]:
+			if hud.line_ready: audio.ui()
 			hud.advance()
 			get_viewport().set_input_as_handled()
 
@@ -159,8 +174,8 @@ func new_game() -> void:
 	session += 1
 	transitioning = false
 	stop_effects()
+	full_game.reset_new_run()
 	flags.clear()
-	ambience.volume_db = -18
 	sequence_id = ""
 	node_id = ""
 	phase = "intro"
@@ -185,106 +200,187 @@ func place_player(position: Vector3, facing: Vector3) -> void:
 
 func on_interact(id: StringName) -> void:
 	if player.locked or transitioning or hud.menu.visible: return
+	if is_instance_valid(full_game) and full_game.interact(id):return
 	match String(id):
 		"mordecai":
 			if phase == "news": start_dialogue("mordecai_news")
 			elif phase == "bruno": start_dialogue("mordecai_bruno")
-			else:
-				var replies := {
-					"to_dressing": "Твоя гримёрная за афишами. Занавес не заперт.",
-					"mirror": "Ты грим так и не смыл. Зеркала в гримёрной.",
-					"elsa_dressing": "Кажется, Эльза тебя звала. Она в гримёрной.",
-					"to_hall": "Твоя коробка опять стучит. Проверь её, потом поговорим.",
-					"lili": "Твоя коробка опять стучит. Проверь её, потом поговорим.",
-					"elsa_hall": "Эльза у служебной двери. Спроси её о Вальтере.",
-					"to_technical": "Кабинет Вальтера — в конце служебного коридора."}
-				hud.show_notice(replies.get(phase, "Мы уже поговорили, Ричард."))
+			else: audio.emote("mordecai_smile")
 		"bruno":
-			start_dialogue("mordecai_bruno" if phase == "bruno" else "bruno_idle")
+			if phase == "bruno": start_dialogue("mordecai_bruno")
+			else: audio.emote("bruno_mgm")
 		"mirror":
 			if phase == "mirror": start_dialogue("mirror")
-			else: hud.show_notice("Улыбка в зеркале исчезла.")
 		"elsa":
 			if phase in ["intro", "news", "to_dressing", "mirror"]: return
 			if phase == "elsa_dressing": start_dialogue("elsa_dressing")
 			elif phase == "elsa_hall": start_dialogue("elsa_hall")
-			else: hud.show_notice("Слышишь? В твоей коробке кто-то шуршит. Она посреди манежа." if phase == "to_hall" else "Замок откроется невидимкой. Вальтер в конце коридора.")
+			else: audio.emote("elsa_sigh")
 		"dressing":
-			if phase not in ["intro", "news"]:
+			if phase not in ["intro", "news"] and not flags.get("dressing_open",false):
 				flags["dressing_open"] = true
-				location.sync();sound("rigging");save_game()
-			else: hud.show_notice("Мордекай окликает меня. Сначала выслушаю его.")
+				location.sync();sound("curtain");save_game()
+			elif not flags.get("dressing_open", false): sound("curtain")
 		"hall":
 			pass
 		"technical":
-			if phase == "to_technical" and flags.get("hairpin", false):
+			if phase in ["elsa_hall","to_technical","return_arena","roof_access"] and not flags.get("service_open",false):
+				var needs_pick: bool = phase in ["return_arena", "roof_access"]
+				if needs_pick and not flags.get("hairpin",false):
+					hud.show_notice("Дверь заперта.");return
 				flags["service_open"] = true
 				location.sync()
-				sound("knock")
+				sound("unlock" if needs_pick else "service_open")
 				save_game()
-			else: hud.show_notice("Замок закрыт. Нужен способ открыть его.")
-		"photos":
-			if phase == "photos": start_dialogue("photos")
+			elif not flags.get("service_open",false):
+				sound("locked")
+				hud.show_notice("Замок закрыт. Нужен способ открыть его.")
+		"photos": enter_photo_inspection()
+		"photo_bruno", "photo_elsa", "photo_lili": inspect_photo(String(id).trim_prefix("photo_"))
+		"photo_child": clinic_photo.interact()
+
+func enter_photo_inspection() -> void:
+	if phase != "photos": return
+	scene_timer.stop()
+	sequence_id = ""; node_id = ""; line = {}
+	photo_comparison = ""
+	hud.close_dialog()
+	player.set_locked(false)
+
+func inspect_photo(id: String) -> void:
+	if phase != "photos" or transitioning: return
+	photo_comparison = id
+	player.set_locked(true)
+	hud.show_line("", "", null, [])
+	hud.show_photo_pair(database.get_photo(id, true))
+	flags["photo_seen_" + id] = true
+	save_game()
 
 func check_walk_progress() -> void:
 	var p: Vector3 = player.position
+	if is_instance_valid(full_game):full_game.check_walk_progress()
 	# Physical walls do the blocking. This recovers corrupted/old saves and falls.
 	if not is_inside_location(p) or p.y < -2:
 		place_player(last_safe_position, last_safe_position + Vector3(0, 1.5, -1))
 		return
 	if player.is_on_floor(): last_safe_position = p
-	if phase == "to_dressing" and p.x < -11.3:
+	if phase == "to_dressing" and Vector2(p.x+48.1356,p.z-40.1154).length()<9.0:
 		phase = "mirror"
-		hud.show_notice("Смою грим… Постой. Где моё отражение?")
 		update_staging()
-	elif phase == "to_hall" and p.x > -7.6:
+		save_game()
+	elif phase == "to_hall" and Vector2(p.x-layout.TRUNK.x,p.z-layout.TRUNK.z).length()<4.0:
 		begin_lili_reveal()
-	elif phase == "to_technical" and flags.get("service_open",false) and p.x > 8.5:
+	elif phase in ["elsa_hall","to_technical"] and flags.get("service_open",false) and p.z > layout.SERVICE_START+.5 and room_at(p)=="service":
 		phase = "technical"
 		update_staging()
 	if phase == "technical":
-		if p.x > 10 and not flags.get("knock_front",false):
+		if p.z > layout.SERVICE_START+2 and not flags.get("knock_front",false):
 			flags["knock_front"] = true
-			sound("knock", -.8)
-		if p.x > 12.5 and not flags.get("knock_behind",false):
+			sound("knock_front")
+		if p.z > layout.SERVICE_START+4.5 and not flags.get("knock_behind",false):
 			flags["knock_behind"] = true
-			sound("knock", .8)
-		if p.x > 16.4:
+			sound("knock_back")
+		if p.z > layout.CLINIC_START+.4:
 			phase = "photos"
 			update_staging()
 			if not flags.get("corridor_scare", false):
 				flags["corridor_scare"] = true
 				show_lili_glimpse()
-				sound("sting")
+				sound("lili_glimpse")
 			save_game()
 
 func is_inside_location(p: Vector3) -> bool:
-	return (p.x >= -8 and p.x <= 8 and p.z >= -8 and p.z <= 8) or (p.x >= -18 and p.x <= -11 and p.z >= -2 and p.z <= 6) or (p.x >= -11 and p.x <= 16 and p.z >= 1 and p.z <= 3.8) or (p.x >= 16 and p.x <= 22 and p.z >= -1 and p.z <= 6)
+	if is_instance_valid(full_game) and full_game.contains(p):return true
+	return layout.contains(p)
+
+func room_at(p: Vector3) -> String:
+	if is_instance_valid(full_game):
+		var late_room:String=full_game.room_at(p)
+		if not late_room.is_empty():return late_room
+	return layout.room_at(p)
+
+func check_mirror_gaze(delta: float) -> void:
+	# The screenplay starts the reflection when the player actually looks into
+	# the glass. A short dwell allows looking around without a forced cut.
+	if phase != "mirror" or player.locked or transitioning or hud.menu.visible:
+		mirror_gaze_time = 0
+		return
+	var eye: Vector3 = player.camera.global_position
+	var forward: Vector3 = -player.camera.global_basis.z
+	var looking := false
+	for mirror in mirror_system.mirrors:
+		var offset: Vector3 = mirror.center - eye
+		if offset.length_squared() > 4.6 * 4.6 or offset.length_squared() < .01: continue
+		if forward.dot(offset.normalized()) < .965: continue
+		if not mirror_system.surface_visible(mirror, player.camera, 4.6): continue
+		# Use the real interaction's occlusion test; no scene through a wall.
+		if is_instance_valid(player.focus) and player.focus.interaction_id == &"mirror":
+			looking = true
+			break
+	mirror_gaze_time = mirror_gaze_time + delta if looking else 0.0
+	if mirror_gaze_time >= .8:
+		mirror_gaze_time = 0
+		start_dialogue("mirror")
 
 func start_dialogue(id: String) -> void:
+	if id == "photos":
+		enter_photo_inspection()
+		return
+	scene_timer.stop()
 	sequence_id = id
 	node_id = database.get_sequence(id)["start"]
+	dialogue_portrait = ""
+	hud.clear_portrait()
 	player.set_locked(true)
 	display_line()
 
 func display_line() -> void:
+	if sequence_id == "photos":
+		var old_photo := node_id.trim_suffix("_photo")
+		enter_photo_inspection()
+		if old_photo in ["bruno", "elsa", "lili"]: inspect_photo(old_photo)
+		return
+	scene_timer.stop()
 	var nodes: Dictionary = database.get_sequence(sequence_id)["nodes"]
 	if node_id == "end":
 		finish_dialogue()
 		return
-	line = nodes[node_id]
+	line = nodes[node_id].duplicate(true)
+	for choice in line.get("choices",[]):
+		for flag in choice.get("requires",{}):
+			if flags.get(flag,false)!=choice.requires[flag]:choice["disabled"]=true
 	if sequence_id == "mirror": mirror_system.begin_scene()
 	var who: String = line.get("speaker", "narrator")
-	var portrait_id: String = line.get("portrait", who)
-	hud.set_voice(who)
-	hud.show_line(database.SPEAKERS.get(who, ""), line.get("text", ""), database.get_portrait(portrait_id), line.get("choices", []), float(line.get("pause", 0)))
+	var background := who in ["richard", "narrator"] and not line.has("portrait")
+	if not background:
+		var portrait_id: String = line.get("portrait", who)
+		dialogue_portrait = portrait_id if database.get_portrait(portrait_id) != null else ""
+	var scene: bool = line.get("presentation", "") == "scene"
+	if scene:
+		hud.close_dialog()
+		hud.touch.hide()
+		hud.crosshair.hide()
+	else:
+		hud.set_voice(who)
+		hud.show_line(database.speaker_name(who, flags.get("richard_name_seen", false)), line.get("text", ""), database.get_portrait(dialogue_portrait), line.get("choices", []), float(line.get("pause", 0)), "background" if background else "speaker")
 	if sequence_id == "photos" and node_id.ends_with("_photo"):
 		var id := node_id.trim_suffix("_photo")
-		hud.show_photo_pair(database.get_photo(id,true), database.get_photo(id,false))
+		hud.show_photo_pair(database.get_photo(id,true))
+	if sequence_id == "photos" and node_id == "2": sound("photo_take")
+	var emotes := {"mordecai_news:0":"mordecai_smile", "mordecai_news:3":"mordecai_laugh", "lili:0":"lili_giggle", "elsa_dressing:0":"elsa_sigh", "mordecai_bruno:0":"bruno_da", "mordecai_bruno:2":"bruno_mgm", "mordecai_bruno:4":"richard_uh", "walter_arrival:1":"walter_hm"}
+	var emote_key := sequence_id+":"+node_id
+	if is_instance_valid(audio) and emotes.has(emote_key): audio.emote(emotes[emote_key])
 	run_event(line.get("event", ""))
+	if scene:
+		scene_timer.start(maxf(.1, float(line.get("duration", 1.2))))
 	save_game()
 
 func advance_dialogue() -> void:
+	if not photo_comparison.is_empty() and not hud.menu.visible:
+		photo_comparison = ""
+		hud.close_dialog()
+		player.set_locked(false)
+		return
 	if sequence_id.is_empty() or hud.menu.visible or transitioning or not line.get("choices", []).is_empty(): return
 	node_id = line.get("next", "end")
 	display_line()
@@ -294,88 +390,117 @@ func select_choice(index: int) -> void:
 	var options: Array = line.get("choices", [])
 	if index < 0 or index >= options.size(): return
 	var option: Dictionary = options[index]
+	if option.get("disabled",false):
+		hud.show_notice("Нужен нож из коробки в манеже.");return
 	flags.merge(option.get("set", {}), true)
 	node_id = option["next"]
 	display_line()
 
 func finish_dialogue() -> void:
+	scene_timer.stop()
 	var finished := sequence_id
 	sequence_id = ""
 	node_id = ""
 	line = {}
+	dialogue_portrait = ""
 	hud.close_dialog()
+	if is_instance_valid(full_game) and full_game.finish_dialogue(finished):return
 	match finished:
 		"intro":
 			location.stage_show.finish_opening()
 			phase = "news"
-		"mordecai_news": phase = "to_dressing"
+			begin_backstage_exploration()
+			return
+		"mordecai_news":
+			phase = "to_dressing"
+			hud.show_notice("Грим стянул кожу. Смыть бы.")
 		"mirror":
 			mirror_system.end_scene()
 			phase = "elsa_dressing"
-			hud.show_notice("Ричард… здесь, у занавеса.")
 			sound("rigging")
 		"elsa_dressing": phase = "to_hall"
-		"lili": phase = "bruno"
+		"lili":
+			phase = "bruno"
 		"mordecai_bruno": phase = "elsa_hall"
 		"elsa_hall": phase = "to_technical"
 		"technical":
 			phase = "photos"
 			hud.set_story_mode("")
 			update_staging()
-			start_dialogue("photos")
+			enter_photo_inspection()
 			return
 		"photos":
-			begin_walter_arrival()
+			enter_photo_inspection()
 			return
-		"walter_arrival":
-			phase = "complete"
-			menu_kind = "end"
-			hud.show_menu("end")
 	update_staging()
 	save_game()
 	player.set_locked(hud.menu.visible)
 
+func begin_backstage_exploration() -> void:
+	# The screenplay cuts from the performance to backstage. Start free roam
+	# within sight and earshot of the cast, with room to investigate the props.
+	# All furnishings and NPC anchors keep their existing authored positions.
+	transitioning = true
+	flags["opening_exit_pending"] = true
+	player.set_locked(true)
+	var token := session
+	save_game()
+	await hud.transition_out()
+	if token != session: return
+	place_player(Vector3(-8, .05, 18), Vector3(-8, 1.6, 30))
+	last_safe_position = player.position
+	update_staging()
+	await hud.transition_in()
+	if token != session: return
+	flags.erase("opening_exit_pending")
+	transitioning = false
+	player.set_locked(false)
+	save_game()
+
 func update_staging() -> void:
 	for id in actors:
-		var show_actor: bool = (id == "mordecai" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "bruno" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "elsa" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "lili" and phase == "lili" and flags.get("lili_visible", false)) or (id == "walter" and phase in ["walter","complete"])
+		var show_actor: bool = (id == "mordecai" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "bruno" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "elsa" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "lili" and phase == "lili" and flags.get("lili_visible", false)) or (id == "walter" and phase in ["technical", "photos", "walter","complete"])
 		actors[id].visible = show_actor
 		var can_interact: bool = show_actor and not (id == "elsa" and phase in ["intro", "news", "to_dressing", "mirror"])
 		actors[id].collision_layer = 1 if can_interact else 0
-	location.move_actor("mordecai", Vector3(2.2,1.25,-3) if phase not in ["intro", "news"] else Vector3(-5.3,1.25,1), 6.0)
+	location.move_actor("mordecai", layout.HALL_MORDECAI if phase not in ["intro", "news"] else layout.ARENA_MORDECAI, 6.0)
 	actors["mordecai"].prompt = "Обсудить крышу с Мордекаем" if phase == "bruno" else "Поговорить с Мордекаем"
 	actors["bruno"].prompt = "Обсудить крышу с Бруно" if phase == "bruno" else "Поговорить с Бруно"
-	actors["bruno"].position = Vector3(4.5,1.55,-3.7)
-	location.move_actor("elsa", Vector3(5.7,2.6,1.4) if phase in ["lili", "bruno", "elsa_hall", "to_technical"] else Vector3(-13.2,2.1 if phase in ["elsa_dressing", "to_hall"] else 4.8,.5), 2.0)
-	var doctor_position: Array = flags.get("walter_position", [18, .95, 3.8])
+	actors["bruno"].position = layout.BRUNO
+	location.move_actor("elsa", layout.ELSA_HALL if phase in ["lili", "bruno", "elsa_hall", "to_technical"] else layout.ELSA_DRESSING + Vector3(0,0 if phase in ["elsa_dressing", "to_hall"] else 2.2,0), 2.0)
+	var doctor_position: Array = flags.get("walter_position", [layout.WALTER_WAIT.x, layout.WALTER_WAIT.y, layout.WALTER_WAIT.z])
 	actors["walter"].position = Vector3(doctor_position[0], doctor_position[1], doctor_position[2])
-	actors["mordecai"].rotation.y = -.35
-	actors["bruno"].rotation.y = -.5
+	actors["mordecai"].rotation.y = PI if phase in ["intro","news"] else -.35
+	actors["bruno"].rotation.y = PI-.5
 	actors["lili"].rotation.y = 0
 	if phase == "lili" and flags.get("lili_visible", false) and not flags.get("lili_reveal_pending", false):
-		actors["lili"].position = Vector3(-4.4, 1.2, .3)
+		actors["lili"].position = layout.LILI
 		actors["lili"].look_at(Vector3(player.position.x, actors["lili"].position.y, player.position.z), Vector3.UP, true)
-	actors["elsa"].rotation.y = .25
+	actors["elsa"].rotation.y = 1.8 if phase in ["lili","bruno","elsa_hall","to_technical"] else PI
 	actors["walter"].rotation.y = float(flags.get("walter_yaw", PI))
 	if is_instance_valid(location): location.sync()
+	if is_instance_valid(clinic_photo): clinic_photo.sync()
 	var notes := {
-		"intro": ["ПОСЛЕДНЕЕ ПРЕДСТАВЛЕНИЕ", "Номер окончен. Мордекай ждёт за кулисами."],
-		"news": ["ЗА КУЛИСАМИ", "Мордекай хотел что-то сказать."],
-		"to_dressing": ["ЗА КУЛИСАМИ", "Хочу смыть грим. Моя комната за коротким проходом с афишами."],
-		"mirror": ["ГРИМЁРНАЯ", "В зеркалах нет моего отражения. Нужно подойти и присмотреться."],
-		"elsa_dressing": ["ГРИМЁРНАЯ", "Эльза зовёт меня из-под потолка."],
-		"to_hall": ["ГРИМЁРНАЯ", "Эльза сказала про крышу. У коробки в манеже кто-то шуршит."],
-		"lili": ["МАНЕЖ", "Моя коробка для фокусов. Кажется, внутри кто-то есть."],
-		"bruno": ["МАНЕЖ", "Мордекай позвал меня к снарядам, где стоит Бруно. Поговорю с ними."],
-		"elsa_hall": ["МАНЕЖ", "Эльза ждёт у служебной двери."],
-		"to_technical": ["МАНЕЖ", "Невидимкой можно открыть служебный замок."],
-		"technical": ["СЛУЖЕБНЫЙ КОРИДОР", "Вальтер — в комнате в конце коридора."],
-		"photos": ["КАБИНЕТ", "На дальней стене висят фотографии артистов."],
-		"walter": ["КАБИНЕТ", "Вальтер стоит передо мной."],
-		"complete": ["КОНЕЦ ГЛАВЫ", "Ричард добрался до Вальтера."]}
-	var info: Array = notes[phase]
+		"intro": ["ПОСЛЕДНЕЕ ПРЕДСТАВЛЕНИЕ", ""],
+		"news": ["ЗА КУЛИСАМИ", ""],
+		"to_dressing": ["ЗА КУЛИСАМИ", "Вернуться в гримёрную."],
+		"mirror": ["ГРИМЁРНАЯ", ""],
+		"elsa_dressing": ["ГРИМЁРНАЯ", ""],
+		"to_hall": ["ГРИМЁРНАЯ", "Найти ключ от двери на крышу."],
+		"lili": ["МАНЕЖ", ""],
+		"bruno": ["МАНЕЖ", ""],
+		"elsa_hall": ["МАНЕЖ", "Найти доктора Вальтера."],
+		"to_technical": ["МАНЕЖ", "Найти доктора Вальтера."],
+		"technical": ["СЛУЖЕБНЫЙ КОРИДОР", "Найти доктора Вальтера."],
+		"photos": ["КАБИНЕТ", ""],
+		"walter": ["КАБИНЕТ", ""],
+		"complete": ["КОНЕЦ ГЛАВЫ", ""]}
+	var info: Array = notes.get(phase,full_game.objective(phase) if is_instance_valid(full_game) else ["LAST SHOW",""])
 	hud.set_objective(info[0], info[1], flags.get("hairpin", false))
+	if is_instance_valid(full_game):full_game.sync()
 
 func run_event(event: String) -> void:
+	if is_instance_valid(full_game) and full_game.event(event):return
 	match event:
 		"applause":
 			sound("applause")
@@ -384,14 +509,14 @@ func run_event(event: String) -> void:
 			sound("crack")
 			location.roof_crack()
 			shake_camera(0.05)
-		"audience": ambience.volume_db = -26
+		"audience": sound("audience")
 		"mirror_empty":
 			flags["reflection_restored"] = false
-			sound("whisper")
+			sound("mirror_empty")
 		"mirror_scare":
 			flags["reflection_restored"] = true
 			hud.scare()
-			sound("sting")
+			sound("mirror_smile")
 			shake_camera(0.09)
 		"lili_appears":
 			# Legacy saves can still enter node 0 directly; never replay the jump under UI.
@@ -401,18 +526,39 @@ func run_event(event: String) -> void:
 			flags["richard_name_seen"] = true
 			flags["lili_visible"] = false
 			update_staging()
+			var lili: Node3D = actors["lili"]
+			lili.position = layout.LILI
+			lili.show()
+			lili.collision_layer = 0
+			var away := layout.LILI + Vector3(-4.5, 0, -3)
+			lili.look_at(Vector3(away.x, lili.position.y, away.z), Vector3.UP, true)
+			if actor_tween: actor_tween.kill()
+			actor_tween = create_tween()
+			actor_tween.tween_property(lili, "position", away, 1.1)
+			actor_tween.tween_callback(lili.hide)
+			var nameplate: MeshInstance3D = model.find_child("Trunk name", true, false)
+			if nameplate:
+				frame_player_at(nameplate.to_global(nameplate.get_aabb().get_center()), .5)
 		"hairpin_received":
 			flags["hairpin"] = true
-			hud.show_notice("Получена невидимка")
+			sound("hairpin")
 			update_staging()
-		"technical_begin": sound("whisper")
-		"knock_front": sound("knock", -0.8)
-		"knock_behind": sound("knock", 0.8)
+		"technical_begin": audio.flicker()
+		"knock_front": sound("knock_front")
+		"knock_behind": sound("knock_back")
 		"lili_silhouette":
 			show_lili_glimpse()
-			sound("sting")
-		"richard_photo": hud.show_caption("РЕБЁНОК")
-		"photo_falls": sound("knock")
+			sound("lili_glimpse")
+		"photo_take": sound("photo_take")
+		"show_photos": frame_player_at(layout.PHOTOS, .35)
+		"richard_photo":
+			clinic_photo.reveal_child()
+			frame_player_at(clinic_photo.photo_card.global_position, .4)
+			sound("richard_photo")
+		"photo_falls":
+			clinic_photo.drop_photo()
+			frame_player_at(clinic_photo.landing_position(), .5)
+			sound("photo_drop")
 		"walter_turn":
 			var initial: Quaternion = player.camera.quaternion
 			player.camera.look_at(actors["walter"].global_position+Vector3(0,.65,0))
@@ -424,7 +570,7 @@ func run_event(event: String) -> void:
 		"walter_appears":
 			update_staging()
 			hud.show_caption("")
-			sound("whisper")
+
 
 func shake_camera(strength: float) -> void:
 	var initial: Vector3 = player.camera.position
@@ -433,44 +579,44 @@ func shake_camera(strength: float) -> void:
 	for offset in [Vector3(strength, 0, 0), Vector3(-strength, strength, 0), Vector3.ZERO]:
 		camera_tween.tween_property(player.camera, "position", initial + offset, 0.09)
 
-func sound(id: String, pan: float = 0) -> void:
-	if not AUDIO_ENABLED: return
-	var stream: AudioStream = load("res://assets/audio/" + id + ".wav")
-	var playback := AudioStreamPlayer.new()
-	playback.stream = stream
-	playback.volume_db = -5
-	# Use a dedicated effects bus to position the tunnel knocks in stereo.
-	if pan != 0:
-		var bus := AudioServer.get_bus_index("StoryPan")
-		if bus == -1:
-			AudioServer.add_bus()
-			bus = AudioServer.bus_count - 1
-			AudioServer.set_bus_name(bus, "StoryPan")
-			var panner := AudioEffectPanner.new()
-			AudioServer.add_bus_effect(bus, panner)
-		var effect: AudioEffectPanner = AudioServer.get_bus_effect(bus, 0)
-		effect.pan = pan
-		playback.bus = "StoryPan"
-	add_child(playback)
-	playback.finished.connect(playback.queue_free)
-	playback.play()
+func sound(id: String) -> void:
+	if is_instance_valid(audio): audio.cue(id)
 
 func on_menu_action(action: String) -> void:
 	match action:
 		"new_game": new_game()
 		"continue": load_game()
 		"pause":
-			if transitioning or hud.menu.visible: return
+			if (transitioning and not flags.get("photo_reveal_pending", false)) or hud.menu.visible: return
 			menu_kind = "pause"
 			location.pause_motion(true)
+			full_game.pause_motion(true)
+			if is_instance_valid(clinic_photo.transition) and clinic_photo.transition.is_valid(): clinic_photo.transition.pause()
+			audio.set_paused(true)
+			typing_paused = hud.text_tween != null and hud.text_tween.is_valid() and hud.text_tween.is_running()
+			if typing_paused: hud.text_tween.pause()
+			hud.pause_portrait(true)
+			hud.pause_timer.paused=true
+			scene_timer.paused = true
 			player.set_locked(true)
 			hud.show_menu("pause")
 			save_game()
 		"resume":
 			location.pause_motion(false)
+			full_game.pause_motion(false)
+			if is_instance_valid(clinic_photo.transition) and clinic_photo.transition.is_valid(): clinic_photo.transition.play()
+			audio.set_paused(false)
+			if typing_paused and hud.text_tween and hud.text_tween.is_valid(): hud.text_tween.play()
+			typing_paused=false
+			hud.pause_portrait(false)
+			hud.pause_timer.paused=false
+			scene_timer.paused = false
 			hud.hide_menu()
+			if line.get("presentation", "") == "scene" or transitioning:
+				hud.touch.hide()
+				hud.crosshair.hide()
 			menu_kind = ""
-			player.set_locked(not sequence_id.is_empty() or transitioning)
+			player.set_locked(not sequence_id.is_empty() or transitioning or not photo_comparison.is_empty())
 		"main_menu":
 			save_game()
 			stop_effects()
@@ -481,12 +627,18 @@ func on_menu_action(action: String) -> void:
 			player.set_locked(true)
 			hud.show_menu("main", not read_save().is_empty())
 		"settings_back": hud.show_menu(menu_kind, menu_kind == "main" and not read_save().is_empty())
+		"endings":hud.show_endings(full_game.unlocked(),full_game.ENDINGS)
 		"quit":
 			if menu_kind != "main": save_game()
 			get_tree().quit()
 
 func save_game() -> void:
-	var data := {"version": 1, "phase": phase, "flags": flags, "sequence": sequence_id, "node": node_id,
+	if phase == "walter" and transitioning:
+		var at: Vector3 = actors["walter"].position
+		flags["walter_position"] = [at.x, at.y, at.z]
+		flags["walter_yaw"] = actors["walter"].rotation.y
+	var data := {"version": 1, "layout": layout.ID, "phase": phase, "flags": flags, "sequence": sequence_id, "node": node_id,
+		"dialogue_portrait": dialogue_portrait,
 		"position": [player.position.x, player.position.y, player.position.z], "yaw": player.rotation.y, "pitch": mirror_system.saved_rotation.get_euler().x if mirror_system.cinematic else (location.stage_show.neutral_pitch if location.stage_show.view_active else player.camera.rotation.x)}
 	var file := FileAccess.open(save_path, FileAccess.WRITE)
 	if file: file.store_string(JSON.stringify(data))
@@ -506,6 +658,7 @@ func load_game() -> void:
 		new_game()
 		return
 	stop_effects()
+	photo_comparison = ""
 	session += 1
 	transitioning = false
 	player.camera.position = Vector3(0, 1.55, 0)
@@ -513,19 +666,31 @@ func load_game() -> void:
 	flags = data["flags"]
 	sequence_id = data.get("sequence", "")
 	node_id = data.get("node", "")
+	dialogue_portrait = str(data.get("dialogue_portrait", database.preceding_portrait(sequence_id, node_id)))
+	if not database.portraits.has(dialogue_portrait): dialogue_portrait = ""
+	# Lili's name reveal is already behind all of these phases, including old
+	# saves in the current layout which did not yet persist the reveal flag.
+	if phase in ["bruno", "elsa_hall", "to_technical", "technical", "photos", "walter", "contract", "roof_key", "return_arena", "roof_access", "roof", "home", "bathroom", "trapped", "captured", "complete"]:
+		flags["richard_name_seen"] = true
+	# Earlier builds ended at Walter's first greeting. Continue those saves at
+	# the contract rather than treating the former chapter stop as an ending.
+	if phase=="complete" and not flags.has("ending_id"):
+		phase="contract";sequence_id="walter_contract";node_id="0"
+		flags["richard_name_seen"]=true
 	var position: Array = data.get("position", [-34, 0.05, 38.7])
 	if position.size() != 3: position = [-34, 0.05, 38.7]
 	player.position = Vector3(float(position[0]), float(position[1]), float(position[2]))
 	player.rotation = Vector3(0, float(data.get("yaw", 0)), 0)
 	player.camera.rotation = Vector3(clampf(float(data.get("pitch", 0)), -1.35, 1.35), 0, 0)
 	player.velocity = Vector3.ZERO
-	if not is_inside_location(player.position):
-		var at := Vector3(-3,.05,3)
-		if phase in ["mirror","elsa_dressing","to_hall"]: at = Vector3(-14,.05,2)
-		elif phase in ["technical","photos","walter","complete"]:
-			at = Vector3(17,.05,2.4)
-			flags["service_open"] = true
+	if data.get("layout", "") != layout.ID or not is_inside_location(player.position):
+		if phase in ["bruno","elsa_hall","to_technical","technical","photos","walter","contract","roof_key","return_arena","roof_access"]:flags["richard_name_seen"]=true
+		flags.erase("walter_position")
+		flags.erase("walter_yaw")
+		var at := layout.safe_position(phase)
+		if phase in ["technical","photos","walter","contract","roof_key","complete"]: flags["service_open"] = true
 		place_player(at, at+Vector3(0,1.5,-1))
+	player.position=full_game.set_dressing.arena_details.safe_saved_position(player.position)
 	last_safe_position = player.position
 	hud.hide_menu()
 	hud.close_dialog()
@@ -534,13 +699,26 @@ func load_game() -> void:
 	menu_kind = ""
 	update_staging()
 	if phase == "complete":
+		var ending:String=flags.get("ending_id","")
+		if full_game.ENDINGS.has(ending):
+			hud.ending_title=full_game.ENDINGS[ending][0];hud.ending_description=full_game.ENDINGS[ending][1]
+			full_game.restore_ending(ending)
 		menu_kind = "end"
 		hud.show_menu("end")
 	elif phase == "lili" and sequence_id.is_empty():
 		begin_lili_reveal()
 	elif phase == "walter" and sequence_id.is_empty():
 		begin_walter_arrival()
-	elif not sequence_id.is_empty(): display_line()
+	elif phase == "news" and sequence_id.is_empty() and flags.get("opening_exit_pending", false):
+		begin_backstage_exploration()
+	elif phase == "photos" and flags.get("richard_photo_fallen", false):
+		flags.erase("photo_reveal_pending")
+		begin_walter_arrival()
+	elif phase == "photos" and flags.get("photo_reveal_pending", false):
+		clinic_photo.interact()
+	elif not sequence_id.is_empty():
+		display_line()
+		full_game.restore_dialogue_view()
 	player.set_locked(hud.menu.visible or not sequence_id.is_empty() or transitioning)
 
 func load_settings() -> void:
@@ -557,20 +735,26 @@ func apply_settings(volume: float, sensitivity: float) -> void:
 	if file: file.store_string(JSON.stringify({"volume": volume, "sensitivity": sensitivity}))
 
 func stop_effects() -> void:
+	photo_comparison = ""
+	scene_timer.stop()
+	scene_timer.paused = false
+	mirror_gaze_time = 0
+	if is_instance_valid(clinic_photo) and is_instance_valid(clinic_photo.transition): clinic_photo.transition.kill()
+	typing_paused=false
 	if glimpse_tween: glimpse_tween.kill()
 	if is_instance_valid(glimpse_node): glimpse_node.queue_free()
 	glimpse_node = null
 	if is_instance_valid(location): location.reset_motion()
+	if is_instance_valid(full_game):full_game.reset_motion()
 	if is_instance_valid(mirror_system): mirror_system.end_scene()
 	if actor_tween: actor_tween.kill()
 	if camera_tween: camera_tween.kill()
-	for child in get_children():
-		if child is AudioStreamPlayer and child != ambience:
-			child.stop()
-			child.queue_free()
+	if is_instance_valid(audio): audio.reset()
+	hud.pause_timer.paused=false
 	hud.reset_effects()
 
 func _exit_tree() -> void:
+	if is_instance_valid(audio): audio.shutdown()
 	for child in get_children():
 		if child is AudioStreamPlayer: child.stop()
 
@@ -604,8 +788,8 @@ func begin_lili_reveal() -> void:
 	hud.crosshair.hide()
 	update_staging()
 	save_game()
-	sound("knock")
-	frame_player_at(Vector3(-3.8, 1.45, -.65), .45)
+	sound("box_first")
+	frame_player_at(layout.TRUNK+Vector3(-.8,.6,.65), .45)
 	var reveal_session := session
 	if actor_tween: actor_tween.kill()
 	actor_tween = create_tween()
@@ -614,13 +798,13 @@ func begin_lili_reveal() -> void:
 		if session != reveal_session: return
 		flags["lili_visible"] = true
 		var actor: Node3D = actors["lili"]
-		actor.position = Vector3(-3, .65, -1.2)
+		actor.position = layout.TRUNK+Vector3(-.7,-.2,.8)
 		actor.visible = true
 		actor.collision_layer = 0
 		actor.look_at(Vector3(player.position.x, actor.position.y, player.position.z), Vector3.UP, true)
-		sound("knock"))
-	actor_tween.tween_property(actors["lili"], "position", Vector3(-3.6, 2.5, -.7), .35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	actor_tween.tween_property(actors["lili"], "position", Vector3(-4.4, 1.2, .3), .4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		sound("box_second"))
+	actor_tween.tween_property(actors["lili"], "position", layout.TRUNK+Vector3(-.7,1.65,.8), .35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	actor_tween.tween_property(actors["lili"], "position", layout.LILI, .4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	actor_tween.tween_interval(.45)
 	actor_tween.tween_callback(func():
 		if session != reveal_session: return
@@ -659,7 +843,7 @@ func find_clear_appearance_position(distance: float, height: float, radius: floa
 			ray.to = position + Vector3(0, height * .88, 0)
 			if space.intersect_ray(ray).is_empty(): return position
 	# The clinic has open floor; this last fallback is only for corrupted/outside saves.
-	return Vector3(19, feet_y, 2.4)
+	return Vector3(layout.CLINIC_CENTER.x, feet_y, layout.CLINIC_CENTER.z)
 
 func begin_walter_arrival() -> void:
 	phase = "walter"
@@ -671,22 +855,30 @@ func begin_walter_arrival() -> void:
 	hud.touch.hide()
 	hud.hint.hide()
 	hud.crosshair.hide()
-	if not flags.has("walter_position"):
-		var feet := find_clear_appearance_position(1.65, 1.86, .30, .025)
-		var position := feet + Vector3(0, .925, 0)
-		var toward_player: Vector3 = player.position - position
-		flags["walter_position"] = [position.x, position.y, position.z]
-		flags["walter_yaw"] = atan2(toward_player.x, toward_player.z)
+	var doctor: Node3D = actors["walter"]
+	var start: Vector3 = doctor.position
+	flags["walter_position"] = [start.x, start.y, start.z]
 	update_staging()
-	frame_player_at(actors["walter"].global_position + Vector3(0, .72, 0), .3)
-	sound("whisper")
 	save_game()
 	var entrance_session := session
 	if actor_tween: actor_tween.kill()
 	actor_tween = create_tween()
-	actor_tween.tween_interval(.95)
+	# He has been standing in the clinic throughout inspection. Walk the open
+	# central aisle from that existing position instead of spawning near the camera.
+	var destination := Vector3(-21.0, .95, 56.4)
+	if Vector2(destination.x-player.position.x,destination.z-player.position.z).length() < 1.1:
+		destination = Vector3(-20.5,.95,55.6)
+	var duration := maxf(.8, start.distance_to(destination) / .8)
+	doctor.look_at(Vector3(destination.x, start.y, destination.z), Vector3.UP, true)
+	actor_tween.tween_property(doctor, "position", destination, duration)
 	actor_tween.tween_callback(func():
 		if session != entrance_session: return
+		flags["walter_position"] = [doctor.position.x, doctor.position.y, doctor.position.z]
+		var toward_player: Vector3 = player.position - doctor.position
+		flags["walter_yaw"] = atan2(toward_player.x, toward_player.z)
+		doctor.rotation.y = flags["walter_yaw"]
+		frame_player_at(doctor.global_position + Vector3(0, .72, 0), .55)
+		sound("walter")
 		transitioning = false
 		start_dialogue("walter_arrival"))
 

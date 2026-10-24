@@ -15,6 +15,9 @@ const IMPORTED_MIRROR_PARTS := ["Mirror Frame", "Mirror surface", "Cylinder_009"
 
 func setup(owner_game):
 	game = owner_game
+	# Run after input and the frame's gameplay updates, so the mask camera,
+	# projected bounds and focused target all describe the same view.
+	process_priority = 100
 	glass_material = StandardMaterial3D.new()
 	glass_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	glass_material.cull_mode = BaseMaterial3D.CULL_DISABLED
