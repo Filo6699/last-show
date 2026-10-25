@@ -91,8 +91,10 @@ func spot(id: String, at: Vector3, target: Vector3, color: String, energy: float
 	light.spot_range=reach;light.spot_angle=angle
 	light.spot_angle_attenuation=1.65;light.spot_attenuation=.65
 	light.shadow_enabled=shadows;light.shadow_bias=.04;light.shadow_normal_bias=.65
+	# Back faces keep the nearby keys from striping the faceted character meshes.
+	light.shadow_reverse_cull_face=id in ["BackstageKey","TrainingKey"]
 	light.shadow_blur=10.0 if id=="ClinicTask" else 3.0
-	light.shadow_opacity=.28 if id=="ClinicTask" else (.60 if id=="DressingKey" else .90)
+	light.shadow_opacity=.28 if id=="ClinicTask" else (.65 if id=="TrainingKey" else (.60 if id=="DressingKey" else .90))
 	fixed_spots.append(light)
 	if performance:show_spots.append(light)
 	if id in ["RingAmber","RingIvory"]: add_shaft(light,target)
