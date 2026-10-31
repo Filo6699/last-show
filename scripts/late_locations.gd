@@ -2,7 +2,12 @@ extends "res://scripts/scene_parts.gd"
 ## Wooden maintenance catwalks INSIDE the upper canopy, and the home interior.
 const ROOF_FLOOR:=39.90
 const ROOF_ENTRY:=Vector3(-10,40.02,-18)
-const ROOF_RETURN:=Vector3(-10,41.1,-19.4)
+const ROOF_RETURN:=Vector3(-10.56,40.6,-19.4)
+# Service mast behind the rear curtain. It carries the catwalk end; the ladder
+# on its west face rises through a hatch in the deck. The arena barrier wall at
+# radius 24 leaves room for the gate only on this side.
+const MAST:=Vector3(-10,0,-19.4)
+const HATCH_X:=-10.5
 const ROPE:=Vector3(-10.1,41.05,-10)
 const TRAMPOLINE:=Vector3(5.3,40.85,-2)
 const AUDIENCE_VIEW:=Vector3(6.5,41.65,-.1)
@@ -15,6 +20,7 @@ var medicine_bag:Node3D
 var pill_cap:MeshInstance3D
 var loose_pills:Array[MeshInstance3D]=[]
 var roof_door:StaticBody3D
+var ladder_top:Array[MeshInstance3D]=[]
 var roof:Node3D
 var home:Node3D
 var roof_env:Environment
@@ -22,7 +28,7 @@ var home_env:Environment
 
 func setup(owner_game) -> void:
 	game=owner_game;name="LaterLocations"
-	ground_stair();make_roof();make_home()
+	service_mast();make_roof();make_home()
 	roof_env=game.get_node("World/WorldEnvironment").environment.duplicate()
 	roof_env.background_color=Color("0b0b12");roof_env.ambient_light_source=Environment.AMBIENT_SOURCE_COLOR
 	roof_env.ambient_light_color=Color("b9a58d");roof_env.ambient_light_energy=.30
@@ -64,19 +70,80 @@ func canopy_above(at: Vector3) -> Dictionary:
 		query.exclude.append(hit.collider.get_rid())
 	return {}
 
-func ground_stair() -> void:
-	var p:=Vector3(-8,0,-11)
-	for side in [-1,1]:box(p+Vector3(side*1.3,1.7,.8),Vector3(.85,3.4,.2),"313e40",true,.6)
-	box(p+Vector3(0,3.1,.8),Vector3(1.75,.6,.2),"313e40",true,.6)
-	roof_door=target("roof_door",p+Vector3(0,1.4,.62),Vector3(1.7,2.8,.15),"Дверь на крышу",true)
+func service_mast() -> void:
+	var top:=ROOF_FLOOR-.24
+	var half:=.5
+	# Four-chord steel truss from a floor plate to the underside of the deck.
+	box(MAST+Vector3(0,.06,0),Vector3(1.5,.12,1.5),"3a3c38",true,.5)
+	for x in [-half,half]:
+		for z in [-half,half]:
+			rod(MAST+Vector3(x,.12,z),MAST+Vector3(x,top,z),.045,"5d6762",.7)
+			box(MAST+Vector3(x,.16,z),Vector3(.16,.08,.16),"2f3431",false,.6)
+	var level:=.12
+	var flip:=1.0
+	while level<top-.5:
+		var next:=minf(level+2.0,top)
+		for face in 4:
+			var a:=Basis(Vector3.UP,face*PI/2)*Vector3(-half,0,half)
+			var b:=Basis(Vector3.UP,face*PI/2)*Vector3(half,0,half)
+			rod(MAST+a+Vector3(0,next,0),MAST+b+Vector3(0,next,0),.025,"6d766f",.7)
+			if flip>0:rod(MAST+a+Vector3(0,level,0),MAST+b+Vector3(0,next,0),.02,"6d766f",.7)
+			else:rod(MAST+b+Vector3(0,level,0),MAST+a+Vector3(0,next,0),.02,"6d766f",.7)
+		level=next;flip=-flip
+	# The truss is solid to the player up to head height.
+	box(MAST+Vector3(0,1.5,0),Vector3(1.1,3,1.1),"000000",true).visible=false
+	# Fixed ladder on the west face: local x runs along the rungs, local z away
+	# from the mast towards the climber's back.
+	var face:=Vector3(MAST.x-half-.06,0,MAST.z)
+	var across:=Vector3(0,0,1)
+	var out:=Vector3(-1,0,0)
+	for side in [-.24,.24]:
+		var foot:Vector3=face+across*side
+		rod(foot,foot+Vector3(0,ROOF_FLOOR+1.1,0),.028,"8a8f84",.75)
+		# Grab rails above the hatch are part of the descent target outline.
+		var grab:MeshInstance3D=rod(foot+Vector3(0,ROOF_FLOOR+1.1,0),foot+Vector3(0,ROOF_FLOOR+1.1,0)-out*.35,.028,"8a8f84",.75)
+		ladder_top.append(grab)
+		ladder_top.append(rod(foot+Vector3(0,ROOF_FLOOR,0),foot+Vector3(0,ROOF_FLOOR+1.1,0),.03,"8a8f84",.75))
+	var rung:=.3
+	while rung<ROOF_FLOOR-.1:
+		rod(face+Vector3(0,rung,0)-across*.24,face+Vector3(0,rung,0)+across*.24,.016,"9a9d90",.75)
+		rung+=.3
+	var bracket:=1.5
+	while bracket<top:
+		for side in [-.24,.24]:rod(face+across*side+Vector3(0,bracket,0),face+across*side+Vector3(0,bracket,0)-out*.06,.02,"5d6762",.7)
+		bracket+=3.0
+	var points:Array[Vector3]=[]
+	for i in 7:
+		var angle:=PI*i/6.0
+		points.append(face+across*cos(angle)*.36+out*(.08+sin(angle)*.6))
+	var hoop:=2.4
+	while hoop<ROOF_FLOOR-.5:
+		for i in 6:rod(points[i]+Vector3(0,hoop,0),points[i+1]+Vector3(0,hoop,0),.014,"7b8178",.75)
+		hoop+=1.4
+	for i in [1,3,5]:
+		rod(points[i]+Vector3(0,2.4,0),points[i]+Vector3(0,ROOF_FLOOR-.3,0),.012,"7b8178",.75)
+	# Padlocked gate in front of the lowest rungs; the target is the gate itself.
+	var gate_at:=face+out*.72
+	roof_door=target("roof_door",gate_at+Vector3(0,1.1,0),Vector3(.12,2.2,.86),"Служебная лестница",true)
 	roof_door.set_meta("dynamic_set",true)
-	var mesh:=BoxMesh.new();mesh.size=Vector3(1.7,2.8,.1)
-	var panel:=MeshInstance3D.new();panel.mesh=mesh;panel.material_override=material("50605b",.5);roof_door.add_child(panel)
-	for i in 7:box(p+Vector3(0,2.5+i*.07,.52),Vector3(1.1,.018,.03),"253734")
-	plaque("ПОДМОСТКИ\nПОД КУПОЛОМ",p+Vector3(0,3.3,.56),2.5,.6)
-	for side in [-1,1]:rod(p+Vector3(side*.6,0,-.1),p+Vector3(side*.6,12,-.1),.06,"78857c",.7)
-	for i in 31:rod(p+Vector3(-.6,.35+i*.36,-.1),p+Vector3(.6,.35+i*.36,-.1),.035,"8e988e",.6)
-	point_light(p+Vector3(0,3.4,1.5),"a9c0b6",.8,7)
+	var gate:=Node3D.new();gate.name="GateParts";roof_door.add_child(gate)
+	var frame:=[[-.4,0,-.4,2.1],[.4,0,.4,2.1],[-.4,2.1,.4,2.1],[-.4,.08,.4,.08],[-.4,1.05,.4,1.05]]
+	for part in frame:
+		rod(gate_at+across*part[0]+Vector3(0,part[1],0),gate_at+across*part[2]+Vector3(0,part[3],0),.022,"5f6a65",.7).reparent(gate,true)
+	for i in 7:
+		var x:=-.3+i*.1
+		rod(gate_at+across*x+Vector3(0,.1,0),gate_at+across*x+Vector3(0,2.08,0),.008,"6f7a74",.7).reparent(gate,true)
+	box(gate_at+across*.33+out*.05+Vector3(0,1.05,0),Vector3(.04,.11,.09),"8b7a4a",false,.8).reparent(gate,true)
+	var gate_meshes:Array[MeshInstance3D]=[]
+	for node in gate.get_children():gate_meshes.append(node)
+	roof_door.set_meta("outline_meshes",gate_meshes)
+	# Gate posts and cage sides close the bottom of the ladder.
+	for side in [-1,1]:
+		box(face+across*side*.44+out*.36+Vector3(0,1.1,0),Vector3(.72,2.2,.05),"000000",true).visible=false
+		rod(gate_at+across*side*.44,gate_at+across*side*.44+Vector3(0,2.4,0),.03,"5d6762",.7)
+	box(face+out*.25+Vector3(0,2.75,0),Vector3(.14,.12,.18),"2c302e",false,.6)
+	var bulb:=sphere(face+out*.3+Vector3(0,2.66,0),Vector3(.09,.09,.09),"e2d3a6");bulb.material_override=material("e2d3a6",0,.5,1.2)
+	point_light(face+out*.7+Vector3(0,2.5,0),"cdbf98",.9,6)
 
 func deck(at:Vector3,size:Vector3, rails_x:=true,rails_z:=false) -> void:
 	box(at-Vector3(0,.12,0),Vector3(size.x,.24,size.z),"4b5350",true,.5)
@@ -100,13 +167,27 @@ func make_roof() -> void:
 	var y:=ROOF_FLOOR
 	# Two joined wooden runs below the ridge. Their end faces touch; their top
 	# surfaces never overlap. The tent cloth remains above the player's head.
-	deck(Vector3(-10,y,-11.8),Vector3(3,0,16.4),true,false)
+	# The first run stops short of the hatch; a narrower piece reaches the mast.
+	deck(Vector3(-10,y,-11.25),Vector3(3,0,15.3),true,false)
+	deck(Vector3(-9.5,y,-19.45),Vector3(2,0,1.1),false,false)
 	deck(Vector3(-1.75,y,-2),Vector3(19.5,0,3.2),false,false)
 	guard(Vector3(-11.5,y,-.4),Vector3(8,y,-.4))
 	guard(Vector3(-8.5,y,-3.6),Vector3(8,y,-3.6))
 	guard(Vector3(-11.5,y,-3.6),Vector3(-11.5,y,-.4))
 	guard(Vector3(8,y,-3.6),Vector3(8,y,-.4))
+	# Hatch rails on three sides; the fourth side is the ladder itself.
 	guard(Vector3(-11.5,y,-20),Vector3(-8.5,y,-20))
+	guard(Vector3(-8.5,y,-20),Vector3(-8.5,y,-18.9))
+	guard(Vector3(-11.5,y,-20),Vector3(-11.5,y,-18.9))
+	guard(Vector3(-11.5,y,-18.9),Vector3(HATCH_X,y,-18.9))
+	box(Vector3(-11,y-.12,-18.9),Vector3(1,.24,.08),"4b5350",false,.5)
+	box(Vector3(HATCH_X,y-.12,-19.45),Vector3(.08,.24,1.1),"4b5350",false,.5)
+	# A chain between the stiles; the player descends through interaction only.
+	for i in 6:
+		var a:=Vector3(HATCH_X-.04,y+.95-sin(PI*i/6)*.12,MAST.z-.24+i*.48/6)
+		var b:=Vector3(HATCH_X-.04,y+.95-sin(PI*(i+1)/6)*.12,MAST.z-.24+(i+1)*.48/6)
+		rod(a,b,.012,"8f8a72",.8)
+	box(Vector3(HATCH_X,y+.5,MAST.z),Vector3(.07,1,.5),"000000",true).visible=false
 	for x in [-8,-1,6]:
 		rod(Vector3(x,y,-2),Vector3(x,y+3.1,-2),.035,"5b5445",.55)
 		box(Vector3(x,y-.3,-2),Vector3(.16,.35,3.5),"4f3f30")
@@ -116,9 +197,9 @@ func make_roof() -> void:
 		rod(entry[0],entry[0]+Vector3(0,1,0),.025,"444f50")
 	# The single attached torn flap belongs to stage_show; no floating strips.
 	plaque("РЕМОНТ КУПОЛА\nДЕРЖАТЬСЯ ПЕРИЛ",Vector3(-11.3,y+1.5,-15),2.2,.65,PI/2)
-	var return_target:=target("roof_return",ROOF_RETURN,Vector3(1.8,2.5,.16),"Спуститься в шатёр")
-	box(ROOF_RETURN,Vector3(1.8,2.5,.08),"465959",false,.5).reparent(return_target,true)
-	plaque("ВНИЗ",ROOF_RETURN+Vector3(0,1.5,.1),1,.4)
+	var return_target:=target("roof_return",ROOF_RETURN,Vector3(.7,1.3,.35),"Спуститься по лестнице")
+	return_target.set_meta("outline_meshes",ladder_top)
+	for piece in ladder_top:piece.set_meta("dynamic_set",true)
 	# The rope and suspended medicine bag form the explicit ending condition.
 	rope_piece=rod(ROPE+Vector3(0,2.8,0),ROPE-Vector3(0,.5,0),.025,"a18b5f")
 	rope_piece.set_meta("dynamic_set",true)
@@ -128,7 +209,7 @@ func make_roof() -> void:
 	var cross1:=box(ROPE+Vector3(0,-.3,.165),Vector3(.26,.07,.02),"bfb99a")
 	var cross2:=box(ROPE+Vector3(0,-.3,.165),Vector3(.07,.26,.02),"bfb99a")
 	cross1.reparent(medicine_bag,true);cross2.reparent(medicine_bag,true)
-	var rope_target:=target("roof_rope",ROPE,Vector3(.7,1.2,.5),"Рассмотреть трос и мешок")
+	var rope_target:=target("roof_rope",ROPE,Vector3(.7,1.2,.5),"Осмотреть трос")
 	rope_target.set_meta("outline_meshes",[rope_piece,bag])
 	# A full trampoline frame, woven bed, many springs and old shoe marks.
 	var t:=Vector3(TRAMPOLINE.x,y,TRAMPOLINE.z)
@@ -146,10 +227,12 @@ func make_roof() -> void:
 	plaque("ШАНС",t+Vector3(0,.7,-.96),.8,.22,PI)
 	var chance:=sign_text("ШАНС",t+Vector3(0,.65,.35),.7,0,"beae85")
 	chance.rotation=Vector3(-PI/2,-PI/2,0)
-	var tramp_target:=target("trampoline",t+Vector3(0,.95,-.8),Vector3(2.2,.7,.4),"Исследовать батут")
+	var tramp_target:=target("trampoline",t+Vector3(0,.95,-.8),Vector3(2.2,.7,.4),"Осмотреть батут")
+	# Outline only the trampoline itself: bed and frame, not the rails behind.
 	var visible: Array[MeshInstance3D]=[]
 	for node in get_children():
-		if node is MeshInstance3D and node.position.distance_to(t)<2:visible.append(node)
+		if node is MeshInstance3D and node.position.distance_to(t+Vector3(0,.6,0))<1.6 and node.position.y>t.y+.55 and node.position.y<t.y+.75:
+			node.set_meta("dynamic_set",true);visible.append(node)
 	tramp_target.set_meta("outline_meshes",visible)
 	asset("rope_coil",t+Vector3(-2,.04,0),.6,.65,false)
 
@@ -232,7 +315,7 @@ func make_home() -> void:
 		pill.set_meta("dynamic_set",true);loose_pills.append(pill)
 	point_light(HOME_MIRROR+Vector3(0,1,.5),"d8e3d6",1.4,5)
 	for side in [-1,1]:
-		box(c+Vector3(side*1.9,1.3,-8.6),Vector3(.08,1.3,1),"ded9c1")
+		box(c+Vector3(side*1.9,1.3,-8.6),Vector3(.08,1.3,1),"ded9c1",true)
 		rod(c+Vector3(side*1.85,2,-9),c+Vector3(side*1.85,2,-8.2),.025,"8f9d90",.7)
 
 func sync() -> void:

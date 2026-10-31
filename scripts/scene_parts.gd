@@ -26,6 +26,16 @@ func solid(obj:MeshInstance3D, size:Vector3, offset:=Vector3.ZERO) -> StaticBody
 	var shape:=CollisionShape3D.new();var bounds:=BoxShape3D.new();bounds.size=size
 	shape.shape=bounds;shape.position=offset;body.add_child(shape);return body
 
+## Invisible box collider for decorative groups built from many visual parts.
+## Several boxes may share one body (pass it back in) to keep body counts low.
+## Coordinates are local to this node; a shared body must be one of its blockers.
+func blocker(at:Vector3, size:Vector3, yaw:=0.0, body:StaticBody3D=null) -> StaticBody3D:
+	if body==null:
+		body=StaticBody3D.new();body.name="SetBlocker";add_child(body)
+	var shape:=CollisionShape3D.new();var bounds:=BoxShape3D.new();bounds.size=size
+	shape.shape=bounds;shape.position=at;shape.rotation.y=yaw
+	body.add_child(shape);return body
+
 func box(at:Vector3, size:Vector3, color:String, physical:=false, metal:=0.0, label:="SetPanel", kind:="paint") -> MeshInstance3D:
 	var mesh:=BoxMesh.new();mesh.size=size
 	var obj:=mesh_node(mesh,at,material(color,metal,-1.0,0.0,kind),label)

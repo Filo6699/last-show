@@ -134,7 +134,7 @@ func reveal_child() -> void:
 	transition.tween_property(paper_cover, "rotation:x", -1.52, 0.78)
 
 func drop_photo(destination: Variant = null) -> void:
-	if not _ready_setup or fallen:
+	if not _ready_setup or fallen or bool(game.flags.get(PENDING_FLAG, false)):
 		return
 	if not revealed:
 		revealed = true
@@ -145,14 +145,18 @@ func drop_photo(destination: Variant = null) -> void:
 	if destination is Transform3D:
 		end_transform = destination
 	else:
-		end_transform = Transform3D(photo_card.global_basis, landing_position())
+		# Face up on the floor (same pose as a fallen card restored by sync()).
+		end_transform = Transform3D(wall.global_basis * Basis(Vector3.RIGHT, -1.52), landing_position())
 	_set_dropped_state(end_transform)
 	photo_card.top_level = true
 	var world_end := end_transform
-	# Do not replace the shared timeline from a callback: stop_effects() owns
-	# cancellation and session changes make already-queued callbacks harmless.
-	if not is_instance_valid(transition) or not transition.is_running():
-		transition = create_tween()
+	# The interaction timeline drops the card itself (see PENDING_FLAG above).
+	# Here a still-running cover lift is finished at once: a started Tween
+	# cannot take new tweeners, and the card must not hang on the wall.
+	if is_instance_valid(transition) and transition.is_running():
+		transition.custom_step(10.0)
+		transition.kill()
+	transition = create_tween()
 	transition.set_parallel(true)
 	transition.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	# Fall outward from the wall, then land flat enough for the face and caption

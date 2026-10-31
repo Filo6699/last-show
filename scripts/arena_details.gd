@@ -70,7 +70,7 @@ func chair_station() -> void:
 	# Folded crash mat and a chalked handprint keep this a working practice spot.
 	parts.box(Vector3(-.9,.23,-1.65),Vector3(2.2,.42,.75),"6c4047",true)
 	for x in [-1.55,-.95,-.35]:parts.box(Vector3(x,.45,-1.65),Vector3(.03,.02,.66),"a89677")
-	var inspect:StaticBody3D=parts.target("balance_chairs",Vector3(1,.90,1.10),Vector3(.85,.35,.35),"Осмотреть балансировочные стулья")
+	var inspect:StaticBody3D=parts.target("balance_chairs",Vector3(1,.90,1.10),Vector3(.85,.35,.35),"Осмотреть стулья")
 	inspect.set_meta("outline_meshes",[seat])
 	lamp(parts,Vector3(1.85,3.0,-1.4),"e9c492",.8)
 
@@ -128,15 +128,17 @@ func ball_station() -> void:
 	# A pair of open wooden braces steadies the globe. A full-height folding screen
 	# used to enclose it like a booth and hid the tent behind the apparatus.
 	for side in [-1,1]:
+		obstruction(parts,Vector3(side*1.34,.85,-.48),Vector3(.16,1.7,2.15))
 		parts.rod(Vector3(side*1.34,.1,.55),Vector3(side*1.34,1.65,-.72),.055,"594635")
 		parts.rod(Vector3(side*1.34,1.65,-.72),Vector3(side*1.34,.1,-1.5),.055,"594635")
 		parts.rod(Vector3(side*1.34,.56,-1.13),Vector3(side*1.34,.56,.12),.04,"8a724f")
-	var inspect:StaticBody3D=parts.target("balance_ball",Vector3(0,1.45,1.22),Vector3(1.2,.8,.20),"Толкнуть балансировочный шар")
+	var inspect:StaticBody3D=parts.target("balance_ball",Vector3(0,1.45,1.22),Vector3(1.2,.8,.20),"Толкнуть шар")
 	inspect.set_meta("outline_meshes",[ball])
 	lamp(parts,Vector3(1.9,3.0,-1.6),"e2bc88",.65)
 
 func lamp(parts:Node3D,at:Vector3,color:String,energy:float) -> void:
 	parts.rod(Vector3(at.x,.05,at.z),at+Vector3(0,.3,0),.025,"4b5149")
+	obstruction(parts,Vector3(at.x,at.y*.5,at.z),Vector3(.14,at.y,.14))
 	var shade:MeshInstance3D=parts.cylinder(at+Vector3(0,.12,0),.22,.14,"393f3b")
 	shade.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var bulb:MeshInstance3D=parts.sphere(at,Vector3.ONE*.12,color)
@@ -166,7 +168,7 @@ func acrobat_station() -> void:
 	for side in [-1,1]:
 		parts.box(Vector3(side*.7,.14,.05),Vector3(.65,.24,1.05),"64503a",true)
 		parts.rod(Vector3(side*.9,.2,-.4),Vector3(side*1.25,.75,0),.04,"7e7858")
-	var inspect:StaticBody3D=parts.target("acrobat_wheel",Vector3(1.45,1.55,.15),Vector3(.40,.8,.25),"Осмотреть акробатический обод")
+	var inspect:StaticBody3D=parts.target("acrobat_wheel",Vector3(1.45,1.55,.15),Vector3(.40,.8,.25),"Осмотреть обод")
 	inspect.set_meta("outline_meshes",[wheel])
 	lamp(parts,Vector3(-3.2,3.1,-1.45),"dfc29b",.65)
 
@@ -210,7 +212,7 @@ func interact(id:StringName) -> bool:
 	if not available():return true
 	match String(id):
 		"balance_chairs":
-			game.hud.show_notice("Четыре стула один на другом. На сиденьях — следы каблуков и мела.")
+			game.hud.show_notice("Четыре стула один на другом. На сиденьях следы каблуков и мела.")
 			game.audio.play("sfx_creak_wood_02",-15,game.targets[String(id)][0].global_position)
 		"spinning_plates":
 			var tween:=motion("plates")
@@ -226,7 +228,7 @@ func interact(id:StringName) -> bool:
 			game.hud.show_notice("Тяжёлый шар поворачивается в деревянной подставке.")
 		"acrobat_wheel":
 			game.audio.play("sfx_elsa_rig_creak_01",-18,game.targets[String(id)][0].global_position)
-			game.hud.show_notice("На внутренней стороне обода стёрта краска — здесь держатся руками и ногами.")
+			game.hud.show_notice("На внутренней стороне обода краска стёрта до дерева.")
 	return true
 
 func motion(id:String) -> Tween:

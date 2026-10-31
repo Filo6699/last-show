@@ -164,6 +164,7 @@ func clinic_finish() -> void:
 		[Vector3(-23.49, 0, 57.0), 5.65, true, Vector3(1, 0, 0)],
 		[Vector3(-16.71, 0, 57.0), 5.65, true, Vector3(-1, 0, 0)]
 	]
+	var guard: StaticBody3D = null
 	for face in wall_faces:
 		var center: Vector3 = face[0]
 		var span: float = face[1]
@@ -182,6 +183,8 @@ func clinic_finish() -> void:
 			tile.rotation.y = yaw
 			var seam := box(pos + normal * .035 + Vector3(0, -.235, 0), Vector3(span / panels - .04, .018, .015), "85918a")
 			seam.rotation.y = yaw
+		# The skirting stands proud of the wall; one shared body keeps it solid.
+		guard = blocker(center + normal * .05 + Vector3(0, .28, 0), Vector3(span, .56, .1), yaw, guard)
 		var rail_size := Vector3(span, .045, .07)
 		var rail := box(center + normal * .05 + Vector3(0, .53, 0), rail_size, "b19a68", false, .28)
 		rail.rotation.y = yaw

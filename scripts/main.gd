@@ -125,7 +125,7 @@ func stage_existing_props() -> void:
 	if crate == null: crate = model.find_child("Crate 2.001",true,false)
 	if crate:crate.set_meta("dynamic_set",true)
 	for mesh_name in ["Mirror Frame", "Mirror surface", "Cylinder_009", "Cylinder_008"]:
-		bind_imported(mesh_name, "mirror", "Посмотреть на своё отражение")
+		bind_imported(mesh_name, "mirror", "Посмотреть в зеркало")
 	# The trunk stays in the arena centre; approaching it triggers Lili's reveal.
 	if not crate:
 		push_error("Missing the existing imported magic box")
@@ -155,6 +155,7 @@ func _process(delta: float) -> void:
 		check_mirror_gaze(delta)
 	if not player.locked and not sequence_id.is_empty():
 		player.set_locked(true)
+	update_guide()
 	autosave_elapsed += delta
 	if autosave_elapsed > 8 and not player.locked and not transitioning:
 		autosave_elapsed = 0
@@ -238,6 +239,23 @@ func on_interact(id: StringName) -> void:
 		"photos": enter_photo_inspection()
 		"photo_bruno", "photo_elsa", "photo_lili": inspect_photo(String(id).trim_prefix("photo_"))
 		"photo_child": clinic_photo.interact()
+		"walter":
+			if phase == "photos": begin_walter_talk()
+			elif phase == "contract": start_dialogue("walter_contract")
+			else: audio.emote("walter_hm")
+
+# Walter waits in the clinic and can be addressed at once; the photographs
+# are optional. He turns to the player and the contract scene follows.
+func begin_walter_talk() -> void:
+	if phase != "photos" or flags.get("photo_reveal_pending", false): return
+	photo_comparison = ""
+	var doctor: Node3D = actors["walter"]
+	var toward_player: Vector3 = player.position - doctor.position
+	flags["walter_position"] = [doctor.position.x, doctor.position.y, doctor.position.z]
+	flags["walter_yaw"] = atan2(toward_player.x, toward_player.z)
+	phase = "walter"
+	update_staging()
+	start_dialogue("walter_greeting")
 
 func enter_photo_inspection() -> void:
 	if phase != "photos": return
@@ -264,6 +282,9 @@ func check_walk_progress() -> void:
 		place_player(last_safe_position, last_safe_position + Vector3(0, 1.5, -1))
 		return
 	if player.is_on_floor(): last_safe_position = p
+	if phase == "to_dressing" and not flags.get("mordecai_relocated", false) and mordecai_unwatched(p):
+		flags["mordecai_relocated"] = true
+		update_staging()
 	if phase == "to_dressing" and Vector2(p.x+48.1356,p.z-40.1154).length()<9.0:
 		phase = "mirror"
 		update_staging()
@@ -312,12 +333,20 @@ func check_mirror_gaze(delta: float) -> void:
 		var offset: Vector3 = mirror.center - eye
 		if offset.length_squared() > 4.6 * 4.6 or offset.length_squared() < .01: continue
 		if forward.dot(offset.normalized()) < .965: continue
+		# Only from within ~45 degrees of the glass normal. From the side the
+		# player cannot see their own reflection, so the scene should not start.
+		var across := Vector3(-offset.x, 0, -offset.z).normalized()
+		if across.dot(Vector3(mirror.normal.x, 0, mirror.normal.z).normalized()) < .7: continue
 		if not mirror_system.surface_visible(mirror, player.camera, 4.6): continue
-		# Use the real interaction's occlusion test; no scene through a wall.
-		if is_instance_valid(player.focus) and player.focus.interaction_id == &"mirror":
+		# No scene through a wall: the sight line may only end on the mirror itself.
+		# (The E-prompt range is shorter; the scene walks the player up to the glass.)
+		var sight := PhysicsRayQueryParameters3D.create(eye, mirror.center + across * .05, 1, [player.get_rid()])
+		var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(sight)
+		if hit.is_empty() or targets.get("mirror", []).has(hit.collider):
 			looking = true
 			break
-	mirror_gaze_time = mirror_gaze_time + delta if looking else 0.0
+	# A loading hitch is not a long look: cap each frame's share of the dwell.
+	mirror_gaze_time = mirror_gaze_time + minf(delta, .05) if looking else 0.0
 	if mirror_gaze_time >= .8:
 		mirror_gaze_time = 0
 		start_dialogue("mirror")
@@ -457,20 +486,46 @@ func begin_backstage_exploration() -> void:
 	player.set_locked(false)
 	save_game()
 
+func mordecai_mark() -> Vector3:
+	# He stays at the news spot through "to_dressing" until relocated unseen.
+	if phase in ["intro", "news"] or (phase == "to_dressing" and not flags.get("mordecai_relocated", false)):
+		return layout.ARENA_MORDECAI
+	return layout.HALL_MORDECAI
+
+func mordecai_unwatched(p: Vector3) -> bool:
+	# The player must be in the dressing passage or tent, with both his old and
+	# new marks outside the camera view.
+	if room_at(p) != "dressing": return false
+	var camera: Camera3D = player.camera
+	for mark in [layout.ARENA_MORDECAI, layout.HALL_MORDECAI]:
+		for height in [-1.2, 0.0, 0.9]:
+			if camera.is_position_in_frustum(mark + Vector3(0, height, 0)): return false
+	return true
+
 func update_staging() -> void:
 	for id in actors:
 		var show_actor: bool = (id == "mordecai" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "bruno" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "elsa" and phase not in ["technical", "photos", "walter", "complete"]) or (id == "lili" and phase == "lili" and flags.get("lili_visible", false)) or (id == "walter" and phase in ["technical", "photos", "walter","complete"])
 		actors[id].visible = show_actor
 		var can_interact: bool = show_actor and not (id == "elsa" and phase in ["intro", "news", "to_dressing", "mirror"])
 		actors[id].collision_layer = 1 if can_interact else 0
-	location.move_actor("mordecai", layout.HALL_MORDECAI if phase not in ["intro", "news"] else layout.ARENA_MORDECAI, 6.0)
+	# Mordecai never walks over in view: he holds his news spot until the player
+	# is out of sight in the dressing tent, then is simply at his hall mark.
+	var mordecai_spot := mordecai_mark()
+	var mordecai_fresh: bool = not location.placements.has("mordecai")
+	location.move_actor("mordecai", mordecai_spot, 0.0)
 	actors["mordecai"].prompt = "Обсудить крышу с Мордекаем" if phase == "bruno" else "Поговорить с Мордекаем"
 	actors["bruno"].prompt = "Обсудить крышу с Бруно" if phase == "bruno" else "Поговорить с Бруно"
 	actors["bruno"].position = layout.BRUNO
 	location.move_actor("elsa", layout.ELSA_HALL if phase in ["lili", "bruno", "elsa_hall", "to_technical"] else layout.ELSA_DRESSING + Vector3(0,0 if phase in ["elsa_dressing", "to_hall"] else 2.2,0), 2.0)
 	var doctor_position: Array = flags.get("walter_position", [layout.WALTER_WAIT.x, layout.WALTER_WAIT.y, layout.WALTER_WAIT.z])
 	actors["walter"].position = Vector3(doctor_position[0], doctor_position[1], doctor_position[2])
-	actors["mordecai"].rotation.y = PI if phase in ["intro","news"] else -.35
+	# After the news talk he keeps whatever way he was facing (no snap turn).
+	if phase in ["intro","news"]: actors["mordecai"].rotation.y = PI
+	elif mordecai_spot == layout.HALL_MORDECAI: actors["mordecai"].rotation.y = -.35
+	elif mordecai_fresh:
+		# Resumed before he relocated: face the player as he did during the talk.
+		var toward: Vector3 = player.global_position - actors["mordecai"].position
+		actors["mordecai"].rotation.y = atan2(toward.x, toward.z) if Vector2(toward.x, toward.z).length() > .1 else PI
 	actors["bruno"].rotation.y = PI-.5
 	actors["lili"].rotation.y = 0
 	if phase == "lili" and flags.get("lili_visible", false) and not flags.get("lili_reveal_pending", false):
@@ -481,23 +536,121 @@ func update_staging() -> void:
 	if is_instance_valid(location): location.sync()
 	if is_instance_valid(clinic_photo): clinic_photo.sync()
 	var notes := {
-		"intro": ["ПОСЛЕДНЕЕ ПРЕДСТАВЛЕНИЕ", ""],
-		"news": ["ЗА КУЛИСАМИ", ""],
-		"to_dressing": ["ЗА КУЛИСАМИ", "Вернуться в гримёрную."],
-		"mirror": ["ГРИМЁРНАЯ", ""],
-		"elsa_dressing": ["ГРИМЁРНАЯ", ""],
-		"to_hall": ["ГРИМЁРНАЯ", "Найти ключ от двери на крышу."],
-		"lili": ["МАНЕЖ", ""],
-		"bruno": ["МАНЕЖ", ""],
-		"elsa_hall": ["МАНЕЖ", "Найти доктора Вальтера."],
-		"to_technical": ["МАНЕЖ", "Найти доктора Вальтера."],
-		"technical": ["СЛУЖЕБНЫЙ КОРИДОР", "Найти доктора Вальтера."],
-		"photos": ["КАБИНЕТ", ""],
-		"walter": ["КАБИНЕТ", ""],
+		"intro": ["ПОСЛЕДНЕЕ ПРЕДСТАВЛЕНИЕ", "Закончить представление"],
+		"news": ["ЗА КУЛИСАМИ", "Поговорить с Мордекаем"],
+		"to_dressing": ["ЗА КУЛИСАМИ", "Вернуться в гримёрную"],
+		"mirror": ["ГРИМЁРНАЯ", "Посмотреть в зеркало"],
+		"elsa_dressing": ["ГРИМЁРНАЯ", "Поговорить с Эльзой"],
+		"to_hall": ["ГРИМЁРНАЯ", "Вернуться на манеж"],
+		"lili": ["МАНЕЖ", "Подойти к сундуку"],
+		"bruno": ["МАНЕЖ", "Спросить Мордекая о крыше"],
+		"elsa_hall": ["МАНЕЖ", "Найти Эльзу за кулисами"],
+		"to_technical": ["МАНЕЖ", "Найти доктора Вальтера"],
+		"technical": ["СЛУЖЕБНЫЙ КОРИДОР", "Найти доктора Вальтера"],
+		"photos": ["КАБИНЕТ", "Поговорить с Вальтером"],
+		"walter": ["КАБИНЕТ", "Поговорить с Вальтером"],
 		"complete": ["КОНЕЦ ГЛАВЫ", ""]}
 	var info: Array = notes.get(phase,full_game.objective(phase) if is_instance_valid(full_game) else ["LAST SHOW",""])
 	hud.set_objective(info[0], info[1], flags.get("hairpin", false))
 	if is_instance_valid(full_game):full_game.sync()
+
+# Point of the current objective (an NPC, door or object), or null.
+func objective_goal():
+	match phase:
+		"news", "bruno": return actors["mordecai"].global_position
+		"to_dressing": return Vector3(-48.1356, 1.4, 40.1154)
+		"mirror":
+			var best = null
+			for body in targets.get("mirror", []):
+				var at: Vector3 = body.to_global(body.get_meta("focus_point", Vector3.ZERO))
+				if best == null or at.distance_squared_to(player.position) < best.distance_squared_to(player.position): best = at
+			return best if best != null else layout.MIRROR
+		"elsa_dressing", "elsa_hall": return actors["elsa"].global_position
+		"to_hall", "lili": return layout.TRUNK
+		"to_technical", "technical": return layout.WALTER_WAIT
+		# The wall photos are optional; Walter can be talked to straight away.
+		"photos", "walter": return actors["walter"].global_position
+	return full_game.objective_goal(phase) if is_instance_valid(full_game) else null
+
+func backstage_door() -> Array:
+	var room: Node = location.get_node_or_null("Backstage") if is_instance_valid(location) else null
+	if room != null and room.get("door_center") is Vector3 and room.door_center != Vector3.ZERO:
+		return [room.door_center, room.door_normal]
+	return [Vector3(-16, 0, 30), Vector3(.47, 0, -.88)]
+
+# Rooms for route finding: the ring, the room behind its curtain wall, the
+# service vestibule, the dressing passage up to its curtain, the dressing room,
+# the corridor and the clinic. Each area's door is where its parent opens in.
+const GUIDE_PARENT := {"backstage": "arena", "passage": "backstage", "dressing": "passage", "vestibule": "backstage", "service": "vestibule", "clinic": "service"}
+# Backstage is a rectangle behind its curtain wall (scripts/backstage.gd):
+# the dressing passage leaves through the west wall, the service corridor
+# through the back wall.
+const BACKSTAGE_WEST_X := -21.6
+const BACKSTAGE_EAST_X := -12.0
+const BACKSTAGE_BACK_Z := 38.4
+const PASSAGE_MOUTH := Vector3(-21.6, 1.4, 33.8)
+const ROOF_CURTAIN_CORNER := Vector3(-12.2, 0, -12)
+
+func passage_offset(p: Vector3) -> Vector2:
+	# Along and across the dressing passage axis, from its origin at (-28, 37).
+	var offset := Vector2(p.x + 28, p.z - 37)
+	return Vector2(offset.dot(Vector2(-.894427, .447214)), offset.dot(Vector2(-.447214, -.894427)))
+
+func guide_area(p: Vector3) -> String:
+	var room := room_at(p)
+	if room != "arena" and room != "dressing": return room
+	var axis := passage_offset(p)
+	if p.x < BACKSTAGE_WEST_X and absf(axis.y) < 1.8 and axis.x < passage_offset(layout.DRESSING_GATE).x: return "passage"
+	if room == "dressing": return room
+	if absf(p.x - layout.SERVICE_X) < 1.4 and p.z >= BACKSTAGE_BACK_Z and p.z < layout.SERVICE_START: return "vestibule"
+	var door := backstage_door()
+	if p.x >= BACKSTAGE_WEST_X and p.x <= BACKSTAGE_EAST_X and p.z < BACKSTAGE_BACK_Z and (p - door[0]).dot(door[1]) < 0: return "backstage"
+	return room
+
+func guide_route(p: Vector3, goal: Vector3) -> Vector3:
+	var doors := {"backstage": backstage_door()[0], "passage": PASSAGE_MOUTH, "dressing": layout.DRESSING_GATE,
+		"vestibule": Vector3(layout.SERVICE_X, 1.4, BACKSTAGE_BACK_Z),
+		"service": layout.TECHNICAL_GATE, "clinic": Vector3(layout.SERVICE_X, 1.4, layout.CLINIC_START)}
+	var from := guide_area(p)
+	var to := guide_area(goal)
+	var points := []
+	var known := (from == "arena" or GUIDE_PARENT.has(from)) and (to == "arena" or GUIDE_PARENT.has(to))
+	if from != to and known:
+		var up := [from]
+		while up[-1] != "arena": up.append(GUIDE_PARENT[up[-1]])
+		var down := [to]
+		while down[-1] != "arena": down.append(GUIDE_PARENT[down[-1]])
+		while up.size() > 1 and down.size() > 1 and up[-2] == down[-2]:
+			up.pop_back(); down.pop_back()
+		for i in up.size() - 1: points.append(doors[up[i]])
+		for i in range(down.size() - 2, -1, -1): points.append(doors[down[i]])
+	# The roof ladder stands behind the rear curtain: go round its west end.
+	if to == "arena" and goal.z < -17.2 and goal.x < -9 and p.z > -16.6 and p.x > ROOF_CURTAIN_CORNER.x + .4:
+		points.append(ROOF_CURTAIN_CORNER)
+	points.append(goal)
+	for point in points:
+		if Vector2(point.x - p.x, point.z - p.z).length() > 1.4: return point
+	return goal
+
+func update_guide() -> void:
+	var active: bool = not player.locked and not transitioning and sequence_id.is_empty() and photo_comparison.is_empty() and not hud.menu.visible
+	var goal = objective_goal() if active else null
+	if goal == null:
+		hud.set_guide(active)
+		return
+	var waypoint: Vector3 = guide_route(player.global_position, goal)
+	var to: Vector3 = waypoint - player.global_position
+	to.y = 0
+	var forward: Vector3 = -player.camera.global_basis.z
+	forward.y = 0
+	if forward.length_squared() < .0001:
+		forward = -player.global_basis.z
+		forward.y = 0
+	if to.length() < 1.2 or forward.length_squared() < .0001:
+		hud.set_guide(active)
+		return
+	# Positive signed angles turn left around UP; the arrow turns clockwise.
+	hud.set_guide(active, -forward.normalized().signed_angle_to(to.normalized(), Vector3.UP), true)
 
 func run_event(event: String) -> void:
 	if is_instance_valid(full_game) and full_game.event(event):return

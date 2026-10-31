@@ -12,6 +12,15 @@ var bone_data := {}
 var active_mirror := -1
 var reflection_clock := 0.0
 const INTERACTION_RANGE := 1.8
+# The mirror scene frames the glass from this far along its normal.
+const SCENE_DISTANCE := 1.8
+# The glass is rendered at roughly its on-screen size, so a distant mirror costs
+# a few pixels and a close-up or zoomed one stays sharp.
+const VISIBLE_RANGE := 60.0
+const MIN_HEIGHT := 64
+const RESOLUTION_STEP := 32
+const MOBILE_HEIGHT := 448
+const DESKTOP_HEIGHT := 1080
 var walk_axis := Vector3.RIGHT
 var smile := false
 var cinematic := false
@@ -53,6 +62,15 @@ func remove_vanity_mirror(vanity: MeshInstance3D) -> void:
 		var material:Material=vanity.get_active_material(index)
 		if material and material.resource_name.begins_with("Clouded_mirror"):continue
 		var arrays:Array=vanity.mesh.surface_get_arrays(index)
+		if material and material.resource_name.begins_with("Aged_walnut"):
+			# The authored legs stop at y=.825, 11 cm under the top (.94), and only
+			# the front has an apron, so from the side they hang loose. Run them up.
+			var walnut:PackedVector3Array=arrays[Mesh.ARRAY_VERTEX]
+			for vertex in walnut.size():
+				var at:Vector3=walnut[vertex]
+				if absf(at.y-.825)<.02 and absf(at.x)>.66 and absf(at.x)<.78 and absf(at.z)>.18 and absf(at.z)<.3:
+					walnut[vertex].y=.94
+			arrays[Mesh.ARRAY_VERTEX]=walnut
 		if material and material.resource_name.begins_with("Tarnished_brass"):
 			var vertices:PackedVector3Array=arrays[Mesh.ARRAY_VERTEX]
 			var indices:PackedInt32Array=arrays[Mesh.ARRAY_INDEX]
@@ -103,7 +121,7 @@ func add_surface(surface: MeshInstance3D) -> void:
 	surface.layers = 4
 	surface.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var viewport := SubViewport.new()
-	viewport.size = Vector2i(160, int(160*bounds.size.y/bounds.size.x))
+	viewport.size = Vector2i(maxi(1,int(MIN_HEIGHT*bounds.size.x/bounds.size.y)), MIN_HEIGHT)
 	viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	viewport.positional_shadow_atlas_size = 512
 	add_child(viewport)
@@ -113,7 +131,7 @@ func add_surface(surface: MeshInstance3D) -> void:
 	viewport.add_child(camera)
 	camera.current = true
 	var shader := Shader.new()
-	shader.code = "shader_type spatial; render_mode unshaded, cull_disabled; uniform sampler2D reflection : source_color, filter_linear; uniform float live = 0.0; void fragment(){ ALBEDO = mix(vec3(0.14,0.17,0.16), texture(reflection, vec2(1.0-UV.x,UV.y)).rgb * vec3(0.88,0.94,0.93), live); }"
+	shader.code = "shader_type spatial; render_mode unshaded, cull_disabled; uniform sampler2D reflection : source_color, filter_linear; uniform float live = 0.0; void fragment(){ ALBEDO = mix(vec3(0.14,0.17,0.16), texture(reflection, vec2(1.0-UV.x,UV.y)).rgb * vec3(0.9,0.95,0.94), live); }"
 	var material := ShaderMaterial.new()
 	material.shader = shader
 	material.set_shader_parameter("reflection",viewport.get_texture())
@@ -145,7 +163,7 @@ func _process(delta: float) -> void:
 		var mirror: Dictionary = mirrors[i]
 		mirror.viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		# One low-resolution viewport, only while the glass is on screen.
-		if not surface_visible(mirror, game.player.camera, 10.0): continue
+		if not surface_visible(mirror, game.player.camera, VISIBLE_RANGE): continue
 		visible.append(i)
 		var alignment: float = -game.player.camera.global_basis.z.dot((mirror.center-eye).normalized())
 		var score: float = alignment + (.01 if i == active_mirror else 0.0)
@@ -155,6 +173,7 @@ func _process(delta: float) -> void:
 	for i in mirrors.size():
 		var mirror: Dictionary = mirrors[i]
 		if i == best:
+			fit_resolution(mirror, game.player.camera)
 			update_reflection(mirror, eye, restored)
 			mirror.last_update = reflection_clock
 			mirror.has_image = true
@@ -177,6 +196,33 @@ func surface_visible(mirror: Dictionary, camera: Camera3D, limit: float) -> bool
 				if plane.distance_to(corner) <= .01: outside = false
 		if outside: return false
 	return true
+
+func fit_resolution(mirror: Dictionary, camera: Camera3D) -> void:
+	var screen: Vector2 = camera.get_viewport().get_visible_rect().size
+	var scale: float = camera.get_viewport().scaling_3d_scale
+	var limit: float = minf(screen.y * scale, height_limit())
+	var height := limit
+	var low := Vector2(INF, INF)
+	var high := -low
+	var behind := false
+	for x in [-1.0, 1.0]:
+		for y in [-1.0, 1.0]:
+			var corner: Vector3 = mirror.center + mirror.right * mirror.size.x * .5 * x + mirror.up * mirror.size.y * .5 * y
+			if camera.is_position_behind(corner): behind = true; continue
+			var point := camera.unproject_position(corner)
+			low = low.min(point); high = high.max(point)
+	if not behind:
+		var extent := high - low
+		height = maxf(extent.y, extent.x * mirror.size.y / mirror.size.x) * scale
+	height = clampf(ceilf(height / RESOLUTION_STEP) * RESOLUTION_STEP, MIN_HEIGHT, maxf(MIN_HEIGHT, limit))
+	var wanted := Vector2i(maxi(1, roundi(height * mirror.size.x / mirror.size.y)), int(height))
+	# Shrink lazily so walking back and forth does not reallocate every step.
+	var current: Vector2i = mirror.viewport.size
+	if wanted.y > current.y or wanted.y < current.y * .6:
+		mirror.viewport.size = wanted
+
+func height_limit() -> float:
+	return MOBILE_HEIGHT if OS.has_feature("mobile") else DESKTOP_HEIGHT
 
 func update_reflection(mirror: Dictionary, eye: Vector3, restored: bool) -> void:
 	var distance: float = (eye-mirror.center).dot(mirror.normal)
@@ -233,15 +279,26 @@ func begin_scene() -> void:
 	var selected: Dictionary = mirrors[0]
 	for mirror in mirrors:
 		if mirror.center.distance_squared_to(focus) < selected.center.distance_squared_to(focus): selected=mirror
-	selected.viewport.size = Vector2i(224,int(224*selected.size.y/selected.size.x))
-	var eye := camera.global_position
+	# Step squarely in front of the glass before zooming. Aiming from where the
+	# player happened to stand put the perpendicular foot beside a narrow mirror,
+	# so the 24-degree close-up framed the canvas. From the glass normal the foot
+	# lands on the glass centre, where Richard's reflected face appears.
+	var player: CharacterBody3D = game.player
+	var facing := Vector3(selected.normal.x,0,selected.normal.z).normalized()
+	var stand: Vector3 = selected.center+facing*SCENE_DISTANCE
+	stand.y = player.global_position.y
+	var eye: Vector3 = stand+Vector3(0,camera.position.y,0)
 	var point: Vector3 = eye-selected.normal*(eye-selected.center).dot(selected.normal)
-	camera.look_at(point,selected.up)
-	var target := camera.quaternion
-	camera.quaternion = saved_rotation
+	var view: Vector3 = point-eye
+	var yaw: float = atan2(facing.x,facing.z)
+	yaw = player.rotation.y+wrapf(yaw-player.rotation.y,-PI,PI)
+	var target := Quaternion(Vector3.RIGHT,atan2(view.y,Vector2(view.x,view.z).length()))
+	var walk: float = clampf(.7+player.global_position.distance_to(stand)*.3,.7,1.5)
 	camera_tween = create_tween().set_parallel(true)
-	camera_tween.tween_property(camera,"quaternion",target,.7).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	camera_tween.tween_property(camera,"fov",24.0,.7).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	camera_tween.tween_property(player,"global_position",stand,walk).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	camera_tween.tween_property(player,"rotation:y",yaw,walk).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	camera_tween.tween_property(camera,"quaternion",target,walk).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	camera_tween.tween_property(camera,"fov",24.0,.7).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT).set_delay(walk-.7)
 
 func end_scene() -> void:
 	if not cinematic: return
@@ -249,4 +306,3 @@ func end_scene() -> void:
 	game.player.camera.quaternion = saved_rotation
 	game.player.camera.fov = saved_fov
 	cinematic = false
-	for mirror in mirrors: mirror.viewport.size = Vector2i(160,int(160*mirror.size.y/mirror.size.x))

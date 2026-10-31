@@ -172,7 +172,8 @@ func reset():
 		if tween and tween.is_valid(): tween.kill()
 	animations.clear();applause=0
 	set_process(false)
-	if is_instance_valid(cane): cane.hide()
+	# A killed gesture would otherwise leave the cane raised for the next one.
+	if is_instance_valid(cane): cane.hide();cane.position.y=-.55
 	if is_instance_valid(loose_canvas):loose_canvas.hide();loose_canvas.rotation=Vector3.ZERO
 
 func finish_opening() -> void:

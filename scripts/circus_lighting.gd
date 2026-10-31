@@ -16,7 +16,7 @@ func setup(owner_game) -> void:
 	var practicals := [
 		[Vector3(0,7,0),"c8c8bf",.50,38.0],
 		[Vector3(-12,3.8,29),"ffbc72",.75,6.5],
-		[Vector3(-25,3.6,39),"ffc181",.85,6.0],
+		[Vector3(game.layout.SERVICE_X,2.74,40.8),"ffc181",.85,6.0],
 		[Vector3(-41.3,2.8,36.6),"ffd29a",1.15,6.0],
 		[Vector3(-53,2.9,44),"d59b66",.60,5.5],
 		[Vector3(-44,3.4,41),"a6b8c1",.45,7.0],
@@ -33,10 +33,17 @@ func setup(owner_game) -> void:
 		light.shadow_enabled=false
 		light.shadow_bias=.04;light.shadow_normal_bias=.25
 		add_child(light);lamps.append(light)
+		# Backstage sconces light Mordecai's spot, and the passage already has its
+		# own pendant at the dressing curtain; these pools have no visible fitting.
+		if i in [1,6]:continue
 		# A visible shade/bulb anchors every local pool to the set.
-		pendant(data[0],light.light_color)
-		var ceiling:float=20 if i<3 else (8 if i<6 else (3.3 if i==6 else 3.4))
-		wire(data[0]+Vector3(0,.23,0),Vector3(data[0].x,ceiling,data[0].z))
+		var fitting:=pendant(data[0],light.light_color)
+		if i==2:
+			wire(data[0]+Vector3(0,.23,0),Vector3(data[0].x,3.2,data[0].z))
+		elif i<6:
+			hang.call_deferred(data[0]+Vector3(0,.23,0),fitting)
+		else:
+			wire(data[0]+Vector3(0,.23,0),Vector3(data[0].x,3.3 if i==6 else 3.4,data[0].z))
 	# Warm crossed keys pick out the ring instead of lighting the entire tent evenly.
 	spot("RingAmber",Vector3(-9,10,-5),Vector3(1,0,2),"f5dfbf",3.6,38,48,true,true)
 	spot("RingIvory",Vector3(9,11,6),Vector3(-2,0,-1),"ebe3d0",1.8,38,55,false,true)
@@ -54,10 +61,9 @@ func setup(owner_game) -> void:
 	# The distant entrance reads as a cold silhouette, with the roof falling into haze.
 	spot("EntranceBlue",Vector3(47,5,20),Vector3(31,0,13),"b4c9d3",2.6,38,50,false,false)
 	spot("CurtainUplight",Vector3(0,1,-7.8),Vector3(0,12,-19),"b37b54",.85,32,45,false,false,false)
-	# Dressing mirrors have warm practical bulbs, rather than a room-wide white wash.
-	for vanity in game.layout.vanity_meshes(game.model):
-		for side in [-1,1]:
-			bulb(vanity.to_global(Vector3(side*.47,1.8,-.15)),Color("ffcc85"),.052)
+	# No vanity bulbs: they hung on the oval mirror frames, and mirrors.gd strips
+	# the glass and frame from every vanity (the story mirror is the standing one),
+	# so bulbs placed there would float against the canvas.
 	add_dust(Vector3(0,3,0),Vector3(9,2.5,8))
 	add_dust(Vector3(-49,2,38),Vector3(4,1.4,3))
 
@@ -116,6 +122,11 @@ func spot(id: String, at: Vector3, target: Vector3, color: String, energy: float
 		stem.top_radius=.035;stem.bottom_radius=.055;stem.height=at.y
 		stem.radial_segments=8;stem.material=metal;stand.mesh=stem
 		stand.position=Vector3(at.x,at.y*.5,at.z);add_child(stand)
+		# Floor-standing can and stem are solid; the player walks around them.
+		var body:=StaticBody3D.new();stand.add_child(body)
+		var shape:=CollisionShape3D.new();var bounds:=BoxShape3D.new()
+		bounds.size=Vector3(.55,at.y+.3,.55);shape.shape=bounds;shape.position.y=.15
+		body.add_child(shape)
 
 func glowing(color: Color, strength: float) -> StandardMaterial3D:
 	var mat:=StandardMaterial3D.new();mat.albedo_color=color*.28
@@ -140,12 +151,27 @@ func bulb(at: Vector3, color: Color, radius: float) -> void:
 	quad.material=material;haze.mesh=quad;haze.position=at
 	haze.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF;add_child(haze)
 
-func pendant(at: Vector3, color: Color) -> void:
+func pendant(at: Vector3, color: Color) -> Array[Node3D]:
+	var before:=get_child_count()
 	bulb(at,color,.085)
 	var shade:=MeshInstance3D.new();var cone:=CylinderMesh.new()
 	cone.top_radius=.12;cone.bottom_radius=.34;cone.height=.20;cone.radial_segments=12
 	var mat:=StandardMaterial3D.new();mat.albedo_color=Color("252923");mat.metallic=.45;mat.roughness=.8
 	cone.material=mat;shade.mesh=cone;shade.position=at+Vector3(0,.13,0);add_child(shade)
+	var nodes:Array[Node3D]=[]
+	for child in get_children().slice(before):nodes.append(child)
+	return nodes
+
+func hang(top: Vector3, fitting: Array[Node3D]) -> void:
+	# Run the cable to whatever actually sits above: canvas, deck or beam.
+	await get_tree().physics_frame
+	if not is_instance_valid(game):return
+	var query:=PhysicsRayQueryParameters3D.create(top,top+Vector3(0,40,0),1,[game.player.get_rid()])
+	var hit:Dictionary=get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		for node in fitting:node.hide()
+		return
+	wire(top,hit.position)
 
 func wire(a: Vector3,b: Vector3) -> void:
 	var node:=MeshInstance3D.new();var mesh:=CylinderMesh.new()

@@ -2,7 +2,8 @@ extends RefCounted
 ## Story coordinates for the supplied October Layout; source units are metres.
 const ID := "supplied-october-2026-full-scenario-v1"
 const TRUNK := Vector3(0,.85,0)
-const DRESSING_GATE := Vector3(-33,1.4,39.5)
+# Curtain at the backstage end of the dressing passage.
+const DRESSING_GATE := Vector3(-22.63,1.4,34.32)
 const TECHNICAL_GATE := Vector3(-20,1.4,46)
 const DRESSING_YAW := -2.677945
 const MIRROR := Vector3(-46.7,1.45,31.45)
@@ -33,7 +34,8 @@ static func in_passage(p: Vector3) -> bool:
 	var offset := Vector2(p.x+28,p.z-37)
 	var along := offset.dot(Vector2(-.894427,.447214))
 	var across := offset.dot(Vector2(-.447214,-.894427))
-	return along >= -3 and along <= 16 and absf(across)<1.8
+	# The passage starts at its curtain (DRESSING_GATE, along -6).
+	return along >= -6 and along <= 16 and absf(across)<1.8
 
 static func room_at(p: Vector3) -> String:
 	if p.z>=CLINIC_START and p.z<=CLINIC_START+6 and p.x>=SERVICE_X-3.6 and p.x<=SERVICE_X+3.4:return "clinic"
@@ -42,7 +44,7 @@ static func room_at(p: Vector3) -> String:
 	return "arena"
 
 static func contains(p: Vector3) -> bool:
-	return Vector2(p.x,p.z).length()<50.3 or Vector2(p.x+48.1356,p.z-40.1154).length()<10.25 or in_passage(p) or (p.x>=-44 and p.x<=-16 and p.z>=40 and p.z<=59) or room_at(p) in ["service","clinic"]
+	return Vector2(p.x,p.z).length()<50.3 or Vector2(p.x+48.1356,p.z-40.1154).length()<10.25 or in_passage(p) or (p.x>=-44 and p.x<=-16 and p.z>=37 and p.z<=59) or room_at(p) in ["service","clinic"]
 
 static func safe_position(phase: String) -> Vector3:
 	if phase=="roof":return Vector3(-10,40.02,-18)

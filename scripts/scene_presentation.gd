@@ -9,6 +9,7 @@ func setup(owner_game) -> void:
 	storage_pavilion()
 	bruno_backdrop()
 	dressing_posters()
+	close_dressing_flap()
 
 
 func story_trunk_dressing() -> void:
@@ -103,8 +104,11 @@ func bruno_backdrop() -> void:
 	# A single tall striped curtain gives the training props and Bruno a stage-like
 	# context. It stays behind the conversation position and off the approach aisle.
 	var wall_x:float=-24.5
-	var wall_start:float=14.5
-	var wall_end:float=29.5
+	# The gallery's front row begins at r=34.3. End the curtain before that
+	# radius so no bench or tread passes through it, and extend it south instead.
+	# Starts .4 m clear of the red wagon parked at z 3.6..10.4.
+	var wall_start:float=11.0
+	var wall_end:float=23.0
 	var depth:float=wall_end-wall_start
 	var height:float=6.4
 	var stripe_count:=12
@@ -121,7 +125,7 @@ func bruno_backdrop() -> void:
 	# A restrained banner over the backdrop completes the silhouette without
 	# adding anything at body height near Bruno or the training equipment.
 	rod(Vector3(wall_x+.12,7.0,wall_start+.25),Vector3(wall_x+.12,7.0,wall_end-.25),.035,"b1965e",.42)
-	for index in 9:
+	for index in int((depth-1.0)/1.7)+1:
 		var z:float=wall_start+.5+index*1.7
 		var top:=Vector3(wall_x+.12,7.0,z)
 		var tip:=top+Vector3(0,-.72,0)
@@ -137,6 +141,20 @@ func dressing_posters() -> void:
 	# dressing-tent wall. Their faces follow the wall and point back into the room.
 	framed_affiche(Vector3(-40.08,2.25,34.15),Vector3(-.804,0,.596),"ВОЗДУШНЫЙ\nНОМЕР")
 	framed_affiche(Vector3(-41.42,2.25,32.70),Vector3(-.671,0,.741),"СИЛОВОЙ\nНОМЕР")
+
+
+func close_dressing_flap() -> void:
+	# The supplied doorways have a flat black fill and lead nowhere. Shade them
+	# as closed canvas flaps instead of unlit holes.
+	var flap:=game.model.find_child("Make-up Tent_002",true,false) as MeshInstance3D
+	if flap==null:return
+	var canvas:=StandardMaterial3D.new();canvas.resource_name="Closed flap canvas"
+	canvas.albedo_color=Color("4a1d29");canvas.roughness=1.0
+	canvas.cull_mode=BaseMaterial3D.CULL_DISABLED
+	flap.material_override=canvas
+	# The main tent's east entrance has the same flat black fill. Close it too.
+	var entrance:=game.model.find_child("Шатер - главный_003",true,false) as MeshInstance3D
+	if entrance:entrance.material_override=canvas
 
 
 func framed_affiche(surface_point:Vector3,inward_normal:Vector3,title:String) -> void:

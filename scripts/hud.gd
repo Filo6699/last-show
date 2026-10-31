@@ -56,6 +56,20 @@ var voice_speed := 22.0
 var voice_color := Color("b5a185")
 var ending_title:=""
 var ending_description:=""
+# Objective line and direction arrow at the top centre. The game feeds them
+# every frame through set_guide(); they fade instead of popping.
+const GUIDE_IVORY := Color("ecd9b8")
+const GUIDE_BRASS := Color("a17b50")
+var guide: Control
+var guide_panel: Panel
+var guide_arrow: Control
+var guide_text := ""
+var guide_active := false
+var guide_has_direction := false
+var guide_angle := 0.0
+var guide_alpha := 0.0
+var guide_arrow_alpha := 0.0
+var guide_aligned := false
 
 func _ready() -> void:
 	pause_timer = Timer.new()
@@ -80,8 +94,7 @@ func _ready() -> void:
 	root.theme = theme
 	chapter = label("", Vector2(24, 20), Vector2(600, 36))
 	chapter.add_theme_color_override("font_color", Color("c9b99e"))
-	objective = label("", Vector2(24, 58), Vector2(560, 96))
-	objective.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	build_guide()
 	item = label("", Vector2(-280, 70), Vector2(250, 60))
 	item.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	item.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -283,7 +296,7 @@ func layout_dialog() -> void:
 	dialog.position = Vector2((root.size.x - width) * 0.5, root.size.y - height - 20)
 	dialog.size = Vector2(width, height)
 	layout_portrait()
-	objective.size.x = minf(560, maxf(180, root.size.x - 140))
+	layout_guide()
 	var choice_height := 54.0
 	# Reserve scrollbar and caption margins before measuring wrapped replies.
 	var caption_width := maxf(1, width - 24 - 24 - choice_scroll.get_v_scroll_bar().get_combined_minimum_size().x)
@@ -516,10 +529,117 @@ func layout_photo_pair() -> void:
 
 func set_objective(area: String, text: String, has_hairpin: bool = false) -> void:
 	chapter.text = area
-	objective.text = text
-	objective.hide()
+	# The label swaps to the new text once the old one has faded out.
+	guide_text = text
 	chapter.hide()
 	item.text = "Невидимка" if has_hairpin else ""
+
+func build_guide() -> void:
+	guide = Control.new()
+	guide.name = "Guide"
+	guide.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(guide)
+	# A plain panel sized by hand: an autowrapped label inside a container
+	# reports its height for a zero width and would stretch the panel.
+	guide_panel = Panel.new()
+	guide_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.067, 0.047, 0.071, 0.62)
+	style.border_color = Color(GUIDE_BRASS, 0.6)
+	style.border_width_bottom = 1
+	style.border_width_top = 1
+	guide_panel.add_theme_stylebox_override("panel", style)
+	guide.add_child(guide_panel)
+	objective = Label.new()
+	objective.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	objective.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# Top-aligned so a stale wrapped minimum height cannot push the text down.
+	objective.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	objective.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	objective.add_theme_font_size_override("font_size", 19)
+	objective.add_theme_color_override("font_color", GUIDE_IVORY)
+	objective.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.7))
+	objective.add_theme_constant_override("shadow_offset_x", 1)
+	objective.add_theme_constant_override("shadow_offset_y", 1)
+	guide_panel.add_child(objective)
+	guide_arrow = Control.new()
+	guide_arrow.name = "GuideArrow"
+	guide_arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	guide_arrow.size = Vector2(38, 38)
+	guide_arrow.pivot_offset = guide_arrow.size * 0.5
+	guide_arrow.draw.connect(draw_guide_arrow)
+	guide.add_child(guide_arrow)
+	guide.modulate.a = 0
+	guide_arrow.modulate.a = 0
+	guide.hide()
+
+func layout_guide() -> void:
+	if not is_instance_valid(guide): return
+	var text := objective.text if not objective.text.is_empty() else guide_text
+	var font := objective.get_theme_font("font")
+	var font_size := objective.get_theme_font_size("font_size")
+	# Stay clear of the pause button (and its touch zone) on the right.
+	var available := maxf(150, root.size.x - 232)
+	var text_width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+	var width := minf(ceilf(text_width) + 48, available)
+	var inner := width - 44
+	var text_height := ceilf(font.get_multiline_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, inner, font_size).y)
+	objective.position = Vector2(22, 6)
+	objective.size = Vector2(inner, 0)
+	# Wrapped lines in a Label carry extra spacing the font measure misses.
+	if objective.text == text: text_height = maxf(text_height, ceilf(objective.get_minimum_size().y))
+	objective.size = Vector2(inner, text_height)
+	var panel_height := text_height + 13
+	guide_panel.position = Vector2.ZERO
+	guide_panel.size = Vector2(width, panel_height)
+	var top := 12.0 if root.size.y < 500 else 18.0
+	guide.position = Vector2(roundf((root.size.x - width) * 0.5), top)
+	guide.size = Vector2(width, panel_height + 44)
+	guide_arrow.position = Vector2(roundf(width * 0.5 - guide_arrow.size.x * 0.5), panel_height + 7)
+
+func set_guide(active: bool, angle: float = 0.0, has_direction: bool = false) -> void:
+	guide_active = active
+	guide_has_direction = has_direction
+	if has_direction: guide_angle = angle
+
+func _process(delta: float) -> void:
+	if not is_instance_valid(guide): return
+	var shown := guide_active and not guide_text.is_empty() and not menu.visible and not dialog.visible and not fade.visible and not story_backdrop.visible and not photo_pair.visible
+	if objective.text != guide_text:
+		# Fade the old objective out before showing the new one.
+		guide_alpha = move_toward(guide_alpha, 0.0, delta * 4.0)
+		if guide_alpha <= 0.0:
+			objective.text = guide_text
+			layout_guide()
+	else:
+		guide_alpha = move_toward(guide_alpha, 1.0 if shown else 0.0, delta * (2.2 if shown else 5.0))
+	var arrow_shown := shown and guide_has_direction and objective.text == guide_text
+	var arrow_was_hidden := guide_arrow_alpha <= 0.01
+	guide_arrow_alpha = move_toward(guide_arrow_alpha, 1.0 if arrow_shown else 0.0, delta * (2.5 if arrow_shown else 5.0))
+	guide.visible = guide_alpha > 0.0
+	guide.modulate.a = ease(guide_alpha, 0.6)
+	guide_arrow.modulate.a = ease(guide_arrow_alpha, 0.6)
+	if guide_has_direction:
+		if arrow_was_hidden: guide_arrow.rotation = guide_angle
+		else: guide_arrow.rotation = wrapf(lerp_angle(guide_arrow.rotation, guide_angle, 1.0 - exp(-delta * 10.0)), -PI, PI)
+	var aligned := absf(wrapf(guide_arrow.rotation, -PI, PI)) < 0.2
+	if aligned != guide_aligned:
+		guide_aligned = aligned
+		guide_arrow.queue_redraw()
+
+func draw_guide_arrow() -> void:
+	var center := guide_arrow.size * 0.5
+	guide_arrow.draw_circle(center, 17.5, Color(0.067, 0.047, 0.071, 0.62))
+	guide_arrow.draw_arc(center, 17.5, 0, TAU, 44, Color(GUIDE_IVORY if guide_aligned else GUIDE_BRASS, 0.75), 1.0, true)
+	# Arrow with a short stem, pointing up; the control's rotation turns it.
+	# A bare notched head read as a chevron pointing backwards at this size.
+	var shape := PackedVector2Array()
+	for point in [Vector2(0, -12), Vector2(8, -2), Vector2(2.6, -2), Vector2(2.6, 10), Vector2(-2.6, 10), Vector2(-2.6, -2), Vector2(-8, -2)]:
+		shape.append(center + point)
+	var outline := shape.duplicate()
+	outline.append(shape[0])
+	guide_arrow.draw_colored_polygon(shape, GUIDE_IVORY if guide_aligned else Color(GUIDE_IVORY, 0.82))
+	guide_arrow.draw_polyline(outline, Color(0, 0, 0, 0.45), 1.0, true)
 
 func show_notice(text: String) -> void:
 	if notice_tween: notice_tween.kill()
@@ -579,7 +699,7 @@ func show_endings(found:Array,definitions:Dictionary) -> void:
 	var title:=Label.new();title.text="Концовки · "+str(found.size())+" / "+str(definitions.size())
 	title.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER;menu_column.add_child(title)
 	for id in definitions:
-		var row:=Label.new();row.text=("✓ "+definitions[id][0]) if found.has(id) else "— Не открыта"
+		var row:=Label.new();row.text=("✓ "+definitions[id][0]) if found.has(id) else "Не открыта"
 		row.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART;row.custom_minimum_size.x=0
 		menu_column.add_child(row)
 	menu_column.add_child(make_button("Назад",func():menu_action.emit("settings_back")))
@@ -638,7 +758,7 @@ func set_story_mode(mode: String) -> void:
 	story_backdrop.visible = not mode.is_empty()
 	story_backdrop.color = Color(0.012, 0.014, 0.021) if mode == "technical" else Color(0.82, 0.83, 0.80)
 	chapter.add_theme_color_override("font_color", Color("564536") if mode == "photos" else Color("c9b99e"))
-	for element in [objective, item]:
+	for element in [item]:
 		element.add_theme_color_override("font_color", Color("23242a") if mode == "photos" else Color.WHITE)
 	story_caption.text = ""
 	silhouette.hide()

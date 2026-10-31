@@ -77,6 +77,9 @@ func setup(owner_game: Node3D) -> void:
 	boundaries.setup(game)
 	build_annex_roofs()
 	build_passage()
+	var backstage := preload("res://scripts/backstage.gd").new()
+	add_child(backstage)
+	backstage.setup(game)
 	preload("res://scripts/set_finish_materials.gd").apply_authored(game.model)
 	var batches := Node3D.new()
 	batches.name = "StaticEnvironmentBatches"
@@ -123,6 +126,19 @@ func gate(id: String, at: Vector3, color: Color) -> void:
 		var pull := CylinderMesh.new();pull.top_radius=.012;pull.bottom_radius=.012;pull.height=.9;pull.radial_segments=8
 		handle.mesh=pull;handle.position=Vector3(-.19,-.45,.98)
 		brass.albedo_color=Color("c2aa7d");brass.metallic=0;brass.roughness=.95
+	else:
+		# Lever handle on both faces at hand height instead of a brass brick.
+		var edge := -.85 if id == "technical" else .85
+		var plate_mesh := BoxMesh.new();plate_mesh.size = Vector3(.02,.2,.06)
+		var lever_mesh := CylinderMesh.new();lever_mesh.top_radius=.014;lever_mesh.bottom_radius=.014;lever_mesh.height=.13;lever_mesh.radial_segments=8
+		handle.mesh = plate_mesh;handle.position = Vector3(-.07,-.4,edge)
+		for side in [-1.0,1.0]:
+			if side > 0:
+				var plate := MeshInstance3D.new();plate.mesh=plate_mesh;plate.material_override=brass
+				plate.position=Vector3(.07,-.4,edge);body.add_child(plate)
+			var lever := MeshInstance3D.new();lever.mesh=lever_mesh;lever.material_override=brass
+			lever.position=Vector3(side*.11,-.36,edge-signf(edge)*.05);lever.rotation.x=PI/2
+			body.add_child(lever)
 	if id == "technical":
 		# Hinge at the corridor-side jamb. The entire leaf rotates into +X,
 		# while its thickness stays inside the corridor's z=3.725 inner wall.
@@ -184,7 +200,7 @@ func sync() -> void:
 			tween.chain().tween_callback(func(): body.collision_layer=0 if opened else 1)
 			gate_motion[id]=tween
 		gate_states[id]=opened
-	gates.dressing.prompt = "Отодвинуть занавес" if game.phase not in ["intro","news"] else "Гримёрная — Мордекай ждёт ответа"
+	gates.dressing.prompt = "Отодвинуть занавес" if game.phase not in ["intro","news"] else "Гримёрная закрыта"
 	if technical_open:
 		gates.technical.prompt = "Служебный коридор"
 	elif game.phase in ["elsa_hall", "to_technical"]:
@@ -195,13 +211,14 @@ func sync() -> void:
 func move_actor(id: String, target: Vector3, duration: float) -> void:
 	var actor: Node3D=game.actors[id]
 	if not placements.has(id): actor.position=target
+	elif placements[id] != target and duration <= 0.0:
+		# Off-screen relocation: no visible walk.
+		if motion.has(id): motion[id].kill();motion.erase(id)
+		actor.position=target
 	elif placements[id] != target:
 		if motion.has(id): motion[id].kill()
 		var tween := create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-		if id=="mordecai" and target==game.layout.HALL_MORDECAI:
-			tween.tween_property(actor,"position",Vector3(-14,1.25,29),2.4)
-			tween.tween_property(actor,"position",target,3.6)
-		elif id=="elsa" and target==game.layout.ELSA_HALL:
+		if id=="elsa" and target==game.layout.ELSA_HALL:
 			tween.tween_property(actor,"position",Vector3(-40,2.1,43),2.0)
 			tween.tween_property(actor,"position",Vector3(-33,2.1,39.5),3.5)
 			tween.tween_property(actor,"position",target,3.0)
@@ -296,7 +313,8 @@ func build_passage() -> void:
 	# through the artist's untouched canvas. The right wall ends before the
 	# authored vanity at the dressing-room mouth, leaving the exit flared open.
 	for side in [-1,1]:
-		var length:float=12.0 if side<0 else 9.15
+		# Both walls run into the dressing tent canvas; no gap to the yard.
+		var length:float=13.1 if side<0 else 10.8
 		var center_x:float=length*.5
 		var wall:=MeshInstance3D.new()
 		var wall_mesh:=BoxMesh.new();wall_mesh.size=Vector3(length,3.22,.12)
@@ -316,15 +334,18 @@ func build_passage() -> void:
 			poster.box(Vector3.ZERO,Vector3(.90,1.36,.025),"aa9875")
 			for edge in [-1,1]:poster.box(Vector3(edge*.41,0,.02),Vector3(.025,1.28,.015),"51343b")
 			var names:=["БРУНО","ЭЛЬЗА","ЛИЛИ"]
-			var paths:=["res://assets/characters/bruno_dialogue.png","res://assets/characters/colored/elsa.png","res://assets/characters/lili_dialogue.png"]
+			var paths:=["res://assets/characters/colored/bruno.png","res://assets/characters/colored/elsa.png","res://assets/characters/colored/lili.png"]
 			poster.sign_text(names[index],Vector3(0,.51,.025),.70,0,"4d3035")
-			var picture:=QuadMesh.new();picture.size=Vector2(.66,.72)
-			var ink:=StandardMaterial3D.new();ink.albedo_texture=load(paths[index]);ink.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR;ink.roughness=1
+			# Fit the artwork inside the frame at its own proportions.
+			var art:Texture2D=load(paths[index])
+			var ratio:float=art.get_width()/float(art.get_height())
+			var picture:=QuadMesh.new();picture.size=Vector2(minf(.66,.72*ratio),minf(.72,.66/ratio))
+			var ink:=StandardMaterial3D.new();ink.albedo_texture=art;ink.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR;ink.roughness=1
 			poster.mesh_node(picture,Vector3(0,.02,.025),ink)
 			poster.sign_text("LAST SHOW",Vector3(0,-.52,.025),.68,0,"563a3c")
 	# Low cloth canopy only covers the main-tent side of the join. Its edges sit
 	# inside the prepared opening; the real dressing tent canvas forms the exit.
-	var canopy:=parts.box(Vector3(4.58,3.29,0),Vector3(9.05,.16,2.92),"423b3c")
+	var canopy:=parts.box(Vector3(5.15,3.29,0),Vector3(10.3,.16,2.92),"423b3c")
 	canopy.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	# The narrow runner and broken brass borders gently bend left around the
 	# authored dressing table at the right-hand mouth. No collision is added.
@@ -340,7 +361,9 @@ func build_passage() -> void:
 			border.position+=Basis(Vector3.UP,yaw)*Vector3(0,0,edge*.53)
 	# Repeated portal ribs stop below the untouched canvas and leave a clear,
 	# continuous 2.9 m walking width between the added walls.
-	for offset in [0.35,3.25,6.15,9.05,11.8]:
+	for offset in [0.35,3.25,6.15,9.05,10.3]:
+		# The last rib frames the dressing-tent canvas opening; no free posts.
+		if offset>10.5:continue
 		for side in [-1,1]:
 			parts.rod(Vector3(offset,.06,side*1.47),Vector3(offset,3.15,side*1.47),.035,"75634c")
 		parts.rod(Vector3(offset,3.15,-1.47),Vector3(offset,3.15,1.47),.035,"75634c")

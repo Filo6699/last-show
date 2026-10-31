@@ -8,6 +8,49 @@ var show
 var aisle_lights: Array[OmniLight3D] = []
 const AISLE_HALF := .024
 
+func close_sector_ends(row_guard: StaticBody3D) -> void:
+	# Later set pieces extend some stand edges; measure after they exist.
+	await get_tree().physics_frame
+	if not is_instance_valid(game): return
+	# Where a stand sector ends, close its side so the deck end and the open
+	# floor beside it don't lead onto the benches. Boxes sit just inside the
+	# seating footprint, following the rake.
+	var steps := 1800
+	var previous := not tread(40.0, -TAU / steps).is_empty()
+	for index in steps:
+		var angle := TAU * index / steps
+		var seated := not tread(40.0, angle).is_empty()
+		if seated != previous:
+			for radius in range(34, 50):
+				# The stand side is not exactly radial; find its edge at each radius.
+				var r := float(radius) + .5
+				var found := NAN
+				var was := walkable(r, angle - .07)
+				for sample in range(-140, 141):
+					var probe := angle + sample * .0005
+					var now := walkable(r, probe)
+					if now != was and (is_nan(found) or absf(probe - angle) < absf(found - angle)): found = probe
+					was = now
+				if is_nan(found): continue
+				var edge := found + (1.0 if seated else -1.0) * .25 / r
+				var hit := surface(r, edge)
+				if hit.is_empty() or hit.position.y < .3: continue
+				var guard := CollisionShape3D.new(); var bounds := BoxShape3D.new()
+				bounds.size = Vector3(.12, 2.0, 1.1); guard.shape = bounds
+				guard.transform = Transform3D(Basis(Vector3.UP, edge), hit.position + Vector3(0, .8, 0))
+				row_guard.add_child(guard)
+		previous = seated
+
+func surface(radius: float, angle: float) -> Dictionary:
+	var at := Vector3(sin(angle) * radius, 12, cos(angle) * radius)
+	var query := PhysicsRayQueryParameters3D.create(at, at - Vector3(0, 13, 0), 1, [game.player.get_rid()])
+	return game.get_world_3d().direct_space_state.intersect_ray(query)
+
+# Raised seating or deck, as opposed to the arena floor beside a stand.
+func walkable(radius: float, angle: float) -> bool:
+	var hit := surface(radius, angle)
+	return not hit.is_empty() and hit.position.y > (4.0 if radius >= 44.0 else .5)
+
 func tread(radius: float, angle: float) -> Dictionary:
 	var at := Vector3(sin(angle) * radius, 12, cos(angle) * radius)
 	var query := PhysicsRayQueryParameters3D.create(at, at - Vector3(0, 13, 0), 1, [game.player.get_rid()])
@@ -70,6 +113,20 @@ func setup(owner_game, owner_show) -> void:
 		rail.rotation.y = angle
 		if index % 3 == 0:
 			box(at+Vector3(0,.7,0),Vector3(.10,1.4,.10),"483e32",true)
+	# The rows are scenery. An invisible wall just inside the rear rail keeps the
+	# 6 m deck from leaking onto the benches; only the aisle ramps cross it.
+	var row_guard := StaticBody3D.new(); row_guard.name = "GalleryRowGuard"; add_child(row_guard)
+	for index in 288:
+		var angle := TAU * (index + .5) / 288
+		var aisle_offset := absf(wrapf(angle + TAU / 24, 0, TAU / 12) - TAU / 24) * 45.0
+		if aisle_offset < .95: continue
+		var hit := tread(45.0, angle)
+		if hit.is_empty(): continue
+		var guard := CollisionShape3D.new(); var bounds := BoxShape3D.new()
+		bounds.size = Vector3(1.05, 1.8, .12); guard.shape = bounds
+		guard.transform = Transform3D(Basis(Vector3.UP, angle), hit.position + Vector3(0, .9, 0))
+		row_guard.add_child(guard)
+	close_sector_ends.call_deferred(row_guard)
 	for section in 8:
 		var angle := TAU * (section + .5) / 8
 		if tread(41, angle).is_empty(): continue
@@ -140,9 +197,13 @@ func build_foundation() -> void:
 		var angle := TAU * (angular + .5) / 180.0
 		var half_angle := TAU / 360.0
 		# The half-width matches the actual 1.7m opening cut in the source GLB.
-		if absf(wrapf(angle + TAU / 24, 0, TAU / 12) - TAU / 24) < .028: continue
-		for radial in 28:
+		var in_aisle := absf(wrapf(angle + TAU / 24, 0, TAU / 12) - TAU / 24) < .028
+		# Rows continue out to the canvas: the 6m promenade behind the last tread
+		# used to leave a dark, walkable ring at ground level under its deck.
+		for radial in 35:
 			var radius := 34.3 + radial * .45
+			# Aisle ramps and their top landings are closed blocks of their own.
+			if in_aisle and radius < 46.8: continue
 			var center := Vector3(sin(angle)*radius,0,cos(angle)*radius)
 			if reserved_passage(center): continue
 			var hit := tread(radius, angle)
@@ -174,7 +235,9 @@ func reserved_passage(at: Vector3) -> bool:
 	# The authored floor route passes beneath the NW stands to the dressing
 	# room and doctor. Keep a visible, capsule-wide underpass instead of
 	# filling those existing story routes with the seating foundation.
-	if at.x > -23.3 and at.x < -16.6 and at.z > 30 and at.z < 48: return true
+	# Only the slot under the deck to the service door; the backstage walls
+	# (backstage.gd) line it, so no hollow is left under the NW rows.
+	if at.x > -22.6 and at.x < -17.4 and at.z > 37.8 and at.z < 48.5: return true
 	var offset := Vector2(at.x+28,at.z-37)
 	var along := offset.dot(Vector2(-.894427,.447214))
 	var across := offset.dot(Vector2(-.447214,-.894427))
@@ -204,9 +267,11 @@ func aisle(angle: float) -> void:
 	var entry := normal * 32.0 + Vector3(0, .075, 0)
 	var start := normal * 33.1 + Vector3(0, .075, 0)
 	var end := normal * 45.5 + Vector3(0, 6.05, 0)
+	# The source deck's aisle cut runs about half a metre past the ramp top.
+	var landing := normal * 46.8 + Vector3(0, 6.05, 0)
 	if tread(43.0, angle).is_empty() and tread(43.0, angle+.06).is_empty() and tread(43.0, angle-.06).is_empty(): return
 	var builder := SurfaceTool.new(); builder.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for ends in [[entry,start],[start,end]]:
+	for ends in [[entry,start],[start,end],[end,landing]]:
 		var first: Vector3 = ends[0]; var last: Vector3 = ends[1]
 		var bottom: Array[Vector3] = []
 		for point in [first-tangent,first+tangent,last-tangent,last+tangent]:
@@ -224,3 +289,15 @@ func aisle(angle: float) -> void:
 	add_mesh_collision(ramp)
 	for side in [-1,1]:
 		rod(start+tangent*side+Vector3(0,.018,0), end+tangent*side+Vector3(0,.018,0), .022, "aa8b57")
+	# Invisible balustrades keep visitors on the stairs: the benches beside the
+	# aisle are scenery, and dropping into the rows put the camera in the seats.
+	var forward := (end - start).normalized()
+	var side_axis := tangent.normalized()
+	if forward.cross(side_axis).y < 0: side_axis = -side_axis
+	var up := forward.cross(side_axis).normalized()
+	var guard_body: StaticBody3D = ramp.get_child(0)
+	for side in [-1,1]:
+		var guard := CollisionShape3D.new(); var bounds := BoxShape3D.new()
+		bounds.size = Vector3(.1, 1.2, start.distance_to(end) + .2); guard.shape = bounds
+		guard.transform = Transform3D(Basis(side_axis, up, forward), (start + end) * .5 + up * .6 + side_axis * side * .93)
+		guard_body.add_child(guard)

@@ -59,6 +59,10 @@ func dress_floor() -> void:
 				source.set_surface_override_material(index,floor_material(floor_tint,0.0 if wood or String(source.name)=="Circle_001" else 1.0))
 		source.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if String(source.name)=="Circle":split_floor(source)
+		# The 200 m ground plane is coplanar (y=0) with the annex floors ("Clinic
+		# floor", "Service floor"), so the two colours z-fight. Sink the visual-only
+		# ground 2 cm; it has no collider, and every room floor then wins cleanly.
+		if String(source.name)=="Plane":source.global_position.y-=.02
 
 func arena() -> void:
 	# A broad ring, gallery banners and rigging give the 100 m tent a coherent
@@ -89,6 +93,8 @@ func arena() -> void:
 		crate(entry[0],entry[1],entry[2])
 	asset("rope_coil",Vector3(21,0,-5),.4)
 	asset("wardrobe",Vector3(25,0,-11),-PI*.4)
+	# The three hoop drums stand shoulder to shoulder; one body covers the row.
+	blocker(Vector3(20.5,.65,-9.5),Vector3(4.0,1.3,1.0))
 	for i in 3:
 		cylinder(Vector3(19+i*1.5,.65,-9.5),.47,1.3,"5a333a")
 		for h in [.2,1.1]:ring(Vector3(19+i*1.5,h,-9.5),.48,.025,"a28b60")
@@ -101,11 +107,17 @@ func arena() -> void:
 	asset("rope_coil",Vector3(-18,0,25.8),.5,1,false)
 	box(Vector3(-17.5,.025,22),Vector3(7,.025,8),"323c39")
 	table(Vector3(-19.5,0,18),2.3,.65)
+	# Four separate dumbbells lie across the table top, each handle running
+	# front to back with a clear gap to its neighbour; plates rest on the wood.
 	for i in 4:
-		var bar:=rod(Vector3(-20.1+i*.38,.98,18),Vector3(-19.8+i*.38,.98,18),.035,"9d9d8c",.7)
+		var handle_x:=-20.1+i*.4
+		var top:=.905+.1
+		rod(Vector3(handle_x,top,17.8),Vector3(handle_x,top,18.2),.03,"9d9d8c",.7)
 		for end in [-1,1]:
-			var plate:=cylinder(bar.position+Vector3(end*.18,0,0),.13,.07,"30353a",.7)
-			plate.rotation.z=PI/2
+			var plate:=cylinder(Vector3(handle_x,top,18+end*.15),.1,.07,"30353a",.7)
+			plate.rotation.x=PI/2
+	# Bag, its two uprights and the hanging chain share one solid footprint.
+	blocker(Vector3(-20.6,1.65,22.75),Vector3(.72,3.3,2.75))
 	box(Vector3(-20.6,3.3,23),Vector3(.3,.24,3.8),"4b3930")
 	rod(Vector3(-20.6,0,24),Vector3(-20.6,3.3,24),.1,"4b3930")
 	rod(Vector3(-20.6,0,21.5),Vector3(-20.6,3.3,21.5),.1,"4b3930")
@@ -129,18 +141,14 @@ func arena() -> void:
 	for index in 10:
 		var angle:=TAU*index/10+.1
 		var at:=Vector3(sin(angle)*34,5.5,cos(angle)*34)
-		if index in [0,5]:plaque("LAST\nSHOW",at,2.1,2.5,angle+PI)
+		if index in [0,5]:
+			plaque("LAST\nSHOW",at,2.1,2.5,angle+PI)
+			# Banners hang from the canvas on two cables.
+			for side in [-1,1]:hang_cable.call_deferred(at+Basis(Vector3.UP,angle+PI)*Vector3(side*.9,1.25,0))
 		var lamp:=sphere(at+Vector3(0,2,0),Vector3(.16,.22,.16),"f5cc8d")
 		lamp.material_override=material("f5cc8d",0,.6,1.1)
+		hang_cable.call_deferred(at+Vector3(0,2.2,0))
 		point_light(at+Vector3(0,1.5,0),"c7b088",.38,10)
-	# Ordinary scuffs, dropped programmes and paint marks break the featureless floor.
-	for index in 45:
-		var angle:=index*2.39996
-		var radius:float=19+(index%9)*1.35
-		var at:=Vector3(sin(angle)*radius,.028,cos(angle)*radius)
-		var paper:=box(at,Vector3(.16,.006,.23),"9d947b")
-		paper.rotation.y=angle
-		for line in 3:box(at+Vector3(0,.004,(line-1)*.05),Vector3(.11,.001,.008),"554b40")
 	# A small visible knife rests on the original trunk; the trunk itself stays put.
 	knife=Node3D.new();knife.name="StoryKnife";knife.set_meta("dynamic_set",true);add_child(knife)
 	var trunk:MeshInstance3D=game.model.find_child("StoryTrunk",true,false)
@@ -157,17 +165,21 @@ func training_rack() -> void:
 	var center := Vector3(-19.8, 0, 21.5)
 	for side in [-1.0, 1.0]:
 		var at := center + Vector3(-.25, 0, side * 1.05)
-		box(at + Vector3(0, .07, 0), Vector3(.85, .14, .48), "35403c", true, .6, "TrainingRackFoot")
-		box(at + Vector3(0, .69, 0), Vector3(.10, 1.25, .10), "59615a", true, .65, "TrainingRackPost")
+		box(at + Vector3(0, .07, 0), Vector3(.85, .14, .48), "35403c", false, .6, "TrainingRackFoot")
+		box(at + Vector3(0, .69, 0), Vector3(.10, 1.25, .10), "59615a", false, .65, "TrainingRackPost")
 		box(at + Vector3(.12, 1.28, 0), Vector3(.34, .07, .10), "8b9184", false, .7, "TrainingRackCradle")
+	# Feet, posts, bar and plates: the bar no longer lets the player walk between posts.
+	blocker(center + Vector3(-.22, .85, 0), Vector3(.98, 1.7, 3.3))
 	var bar := rod(center + Vector3(-.05, 1.36, -1.65), center + Vector3(-.05, 1.36, 1.65), .035, "a1a597", .8)
 	bar.name = "SingleTrainingBar"
+	# Three plates per side, stepping down in size with a clear gap between
+	# them, so each reads as its own disc instead of one merged drum.
 	for side in [-1.0, 1.0]:
 		for plate_index in 3:
-			var plate := cylinder(center + Vector3(-.05, 1.36, side * (1.21 + plate_index * .11)), .32, .10, "303b3a", .7, 20)
+			var plate := cylinder(center + Vector3(-.05, 1.36, side * (1.19 + plate_index * .12)), .32 - plate_index * .05, .07, "303b3a", .7, 20)
 			plate.rotation.x = PI / 2
 			plate.name = "TrainingPlate"
-		var collar := cylinder(center + Vector3(-.05, 1.36, side * 1.56), .065, .06, "c0b78e", .8, 12)
+		var collar := cylinder(center + Vector3(-.05, 1.36, side * 1.52), .065, .06, "c0b78e", .8, 12)
 		collar.rotation.x = PI / 2
 
 func dressing() -> void:
@@ -192,6 +204,20 @@ func dressing() -> void:
 	for node in get_children().slice(television_start):
 		if node is MeshInstance3D:node.set_meta("dynamic_set",true);tv_meshes.append(node)
 	television.set_meta("outline_meshes",tv_meshes)
+	# The supplied teal door mat at the passage mouth sits under the end of the
+	# passage runner, a second rug overlapping the first right in the doorway.
+	# The runner already marks the way in; drop the mat and its 2 cm collider.
+	var door_mat:=game.model.find_child("Plane_008",true,false) as MeshInstance3D
+	if door_mat:door_mat.hide()
+	for body in game.model.get_node("GeometryCollisions").get_children():
+		if String(body.get_meta("source_mesh",""))=="Plane_008":body.collision_layer=0
+	# The tent's three lantern mounts were authored for a lower ceiling and hung
+	# 2-4 m under the canvas, one of them over the bed. Run each up on a cable.
+	for lantern in game.model.find_children("Lamp ceiling mount*","MeshInstance3D",true,false):
+		var bounds:AABB=lantern.global_transform*lantern.get_aabb()
+		var top:=Vector3(bounds.get_center().x,bounds.end.y,bounds.get_center().z)
+		if lantern.visible and Vector2(top.x+48.14,top.z-40.12).length()<10:hang_cable.call_deferred(top)
+	blocker(Vector3(-51.8,1.25,45.95),Vector3(2.2,2.5,.5))
 	rod(Vector3(-52.8,0,46),Vector3(-52.8,2.5,46),.035,"665c49",.4)
 	rod(Vector3(-50.8,0,46),Vector3(-50.8,2.5,46),.035,"665c49",.4)
 	rod(Vector3(-52.8,2.5,46),Vector3(-50.8,2.5,46),.035,"665c49",.4)
@@ -199,15 +225,21 @@ func dressing() -> void:
 		var coat:=box(Vector3(-52.55+index*.46,1.65,46),Vector3(.35,1.45,.16),["583c40","3e4c4e","6c6552","533e4d"][index])
 		coat.rotation.z=(index-1.5)*.04
 	for i in 3:
-		plaque(["НОВЫЙ СЕЗОН","АРТИСТЫ ЦИРКА","ВЕЧЕРОМ — АНШЛАГ"][i],Vector3(-54.5+i*1.1,2.4,33.9),.9,1.1,.2)
+		plaque(["НОВЫЙ СЕЗОН","АРТИСТЫ ЦИРКА","СЕГОДНЯ АНШЛАГ"][i],Vector3(-54.5+i*1.1,2.4,33.9),.9,1.1,.2)
 	point_light(Vector3(-53,3.5,36),"e1b98b",.7,7)
 
 func service() -> void:
 	var x:float=game.layout.SERVICE_X;var z:float=game.layout.SERVICE_START
 	plaque("ТОЛЬКО ДЛЯ\nПЕРСОНАЛА",Vector3(x,2.9,z-.18),1.7,.6,PI)
+	# The corridor floor overlaps the clinic floor by 20 cm in the doorway, both
+	# at y=0. Sink the walnut 1 cm (visual only) so the clinic floor wins there.
+	var corridor_floor:Node3D=game.model.find_child("Service floor",true,false)
+	if corridor_floor:corridor_floor.global_position.y-=.01
+	var braces:StaticBody3D=null
 	for side in [-1,1]:
 		for offset in [2.5,5.8]:
 			rod(Vector3(x+side*1.28,.25,z+offset),Vector3(x+side*1.28,2.8,z+offset),.04,"4f6563",.6)
+			braces=blocker(Vector3(x+side*1.3,1.4,z+offset),Vector3(.14,2.8,.14),0.0,braces)
 	for offset in [1.4,4.4,6.8]:
 		box(Vector3(x+.98,.025,z+offset),Vector3(.23,.018,.42),"6e6551")
 		rod(Vector3(x+1.1,.06,z+offset),Vector3(x+.8,.06,z+offset+.3),.025,"90988d",.7)
@@ -333,6 +365,8 @@ func large_sets() -> void:
 	for x in [5.5,7.5]:rod(Vector3(x,11,25.5),Vector3(x,5.2,25.5),.035,"ab9870")
 	rod(Vector3(5.5,5.2,25.5),Vector3(7.5,5.2,25.5),.055,"bda575")
 	box(Vector3(6.5,.07,25.5),Vector3(8,.12,3.5),"40514b")
+	# The lowered net hangs at waist height: it is a barrier, not a walkway.
+	blocker(Vector3(6.5,.6,25.5),Vector3(7.6,1.2,4.4))
 	for x in range(3,11):rod(Vector3(x,1.2,23.4),Vector3(x,.8,27.6),.013,"877e61")
 	for i in 9:rod(Vector3(2.8,1,23.5+i*.5),Vector3(10.2,1,23.5+i*.5),.013,"877e61")
 	point_light(Vector3(6.5,7,24),"9fbec5",1.8,16)
@@ -340,6 +374,9 @@ func large_sets() -> void:
 	for index in 20:
 		var x:float=-10+index*1.0
 		cylinder(Vector3(x,4.4,-17),.55,8.8,"502432" if index%2==0 else "66313e")
+	# Heavy pleated fabric is one continuous wall. Its west end stays open so the
+	# backstage strip behind it (x -12..-8, z -17..-24) is reached around the edge.
+	blocker(Vector3(-.5,4.4,-17),Vector3(20.1,8.8,1.1))
 	rod(Vector3(-10.7,9,-17),Vector3(10.7,9,-17),.13,"8d7957",.55)
 	plaque("ПОСЛЕДНЕЕ ПРЕДСТАВЛЕНИЕ",Vector3(0,7.4,-16.35),13,1.4)
 	for x in [-11,11]:
@@ -348,8 +385,17 @@ func large_sets() -> void:
 			var grille:=ring(Vector3(x,y,-15.05),.3,.025,"81785f");grille.rotation.x=PI/2
 	point_light(Vector3(0,6,-13),"bc875d",1.4,15)
 
+func hang_cable(top:Vector3) -> void:
+	await get_tree().physics_frame
+	if not is_instance_valid(game):return
+	var query:=PhysicsRayQueryParameters3D.create(top,top+Vector3(0,40,0),1,[game.player.get_rid()])
+	var hit:Dictionary=get_world_3d().direct_space_state.intersect_ray(query)
+	if not hit.is_empty():rod(top,hit.position,.01,"25262a")
+
 func wagon(c:Vector3,color:String,open_back:bool) -> void:
-	box(c+Vector3(0,.65,0),Vector3(3.7,.32,6.8),"443c32",true)
+	box(c+Vector3(0,.65,0),Vector3(3.7,.32,6.8),"443c32")
+	# Chassis plus the outboard wheels and rims.
+	blocker(c+Vector3(0,.72,0),Vector3(4.3,1.44,6.8))
 	box(c+Vector3(0,2.25,0),Vector3(3.5,2.9,6.3),color,true)
 	for side in [-1,1]:
 		for z in [-2.2,2.2]:

@@ -18,8 +18,8 @@ func _init() -> void:
 	portraits["walter"] = load("res://assets/characters/colored/walter.png")
 	# Fraction from the crown to the upper thighs in each supplied full-body PNG.
 	# Keep framing with the artwork, including lines that override the speaker.
-	for id in ["mordecai", "bruno", "lili", "walter"]:
-		portraits[id].set_meta("dialogue_hip_fraction", {"mordecai": 0.72, "bruno": 0.60, "lili": 0.55, "walter": 0.57}[id])
+	for id in ["mordecai", "bruno", "lili", "walter", "elsa"]:
+		portraits[id].set_meta("dialogue_hip_fraction", {"mordecai": 0.72, "bruno": 0.60, "lili": 0.55, "walter": 0.57, "elsa": 0.50}[id])
 		portraits[id].set_meta("dialogue_height", 0.82 if id == "lili" else 1.0)
 
 func get_sequence(id: String) -> Dictionary:

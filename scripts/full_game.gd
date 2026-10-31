@@ -2,7 +2,7 @@ extends Node3D
 ## Remaining screenplay: Walter's contract, real roof traversal, and four endings.
 const PHASES:=["contract","roof_key","return_arena","roof_access","roof","home","bathroom","trapped","captured"]
 const ENDINGS:={
-	"recovery":["ВНЕ ЦИРКА","Ты проснулся дома. В зеркале — ты. Лекарства открыты."],
+	"recovery":["ВНЕ ЦИРКА","Ты проснулся дома. В зеркале отражаешься ты. Лекарства открыты."],
 	"host":["ПРЕДСТАВЛЕНИЕ ПРОДОЛЖАЕТСЯ","Ты вернулся домой. Но ведущий остался в отражении."],
 	"captured":["НОВЫЙ НОМЕР","Новый ведущий представляет тебя публике."],
 	"locker":["БЕЗ ВЫХОДА","Дверь закрылась. Никто не пришёл на помощь."]
@@ -34,17 +34,35 @@ func setup(owner_game) -> void:
 
 func objective(phase:String) -> Array:
 	return {
-		"contract":["ДОКТОР ВАЛЬТЕР","Вальтер предлагает подписать пустой документ."],
-		"roof_key":["КЛЮЧ","Взять ключ от крыши со стола Вальтера."],
-		"return_arena":["ПОСЛЕ ПРЕДСТАВЛЕНИЯ","Вернуться в главный зал. Дверь на крышу находится за сценой."],
-		"roof_access":["ЗА СЦЕНОЙ","Открыть дверь на крышу ключом или невидимкой."],
-		"roof":["ПОД КУПОЛОМ","Пройти по деревянным подмосткам к тросу и старому батуту."],
-		"home":["ДОМ","Пройти в ванную и посмотреть в зеркало."],
-		"bathroom":["ОТРАЖЕНИЕ","Посмотреть на себя."],
-		"trapped":["ЗАПЕРТО","Дверь не открывается. В шкафчике что-то есть."],
-		"captured":["ПОСЛЕДНИЙ НОМЕР","Ты снова в цирке."],
+		"contract":["ДОКТОР ВАЛЬТЕР","Прочитать документ на столе"],
+		"roof_key":["КЛЮЧ","Взять ключ со стола Вальтера"],
+		"return_arena":["ПОСЛЕ ПРЕДСТАВЛЕНИЯ","Вернуться на манеж"],
+		"roof_access":["ЗА СЦЕНОЙ","Найти лестницу на крышу за сценой"],
+		"roof":["ПОД КУПОЛОМ","Пройти по мосткам к батуту"],
+		"home":["ДОМ","Посмотреть в зеркало в ванной"],
+		"bathroom":["ОТРАЖЕНИЕ",""],
+		"trapped":["ЗАПЕРТО","Открыть шкафчик"],
+		"captured":["ПОСЛЕДНИЙ НОМЕР",""],
 		"complete":["КОНЕЦ ИГРЫ",""]
 	}.get(phase,["LAST SHOW",""])
+
+# World point the objective arrow should lead to in a late phase, or null.
+func objective_goal(phase:String):
+	var p:Vector3=game.player.global_position
+	match phase:
+		"contract":return set_dressing.contract_paper.global_position
+		"roof_key":return set_dressing.clinic_key.get_meta("target").global_position
+		"return_arena","roof_access":return late.roof_door.global_position
+		"roof":
+			# The catwalk is an L: the long strip passes the rope, then turns east.
+			if p.z<-3.9:return Vector3(-10,late.ROOF_FLOOR,-2)
+			return late.TRAMPOLINE
+		"home":
+			# Bedroom first, through the doorway in the north wall.
+			if p.z>-3.2:return late.HOME+Vector3(0,0,-4.6)
+			return late.HOME_MIRROR
+		"trapped":return set_dressing.locker.global_position
+	return null
 
 func room_at(position:Vector3) -> String:
 	if late.is_roof_position(position):return "roof"
@@ -77,6 +95,8 @@ func interact(id:StringName) -> bool:
 				game.update_staging();game.save_game()
 		"locker":
 			if game.phase=="trapped":game.start_dialogue("ending_locker")
+			# Before talking to Walter the locker is the other branch of the clinic.
+			elif game.phase=="photos" and not game.flags.get("locker_open",false):game.start_dialogue("clinic_locker")
 		"roof_door":
 			if game.phase not in ["return_arena","roof_access"]:
 				game.audio.play("sfx_door_locked", -9, late.roof_door.global_position)
@@ -98,7 +118,7 @@ func interact(id:StringName) -> bool:
 
 func finish_dialogue(id:String) -> bool:
 	match id:
-		"walter_arrival":
+		"walter_arrival","walter_greeting":
 			game.phase="contract";game.update_staging();game.start_dialogue("walter_contract")
 		"walter_contract":
 			if game.flags.get("contract_signed",false):game.phase="roof_key"
@@ -117,6 +137,11 @@ func finish_dialogue(id:String) -> bool:
 		"home_host":complete("host")
 		"ending_captured":complete("captured")
 		"ending_locker":complete("locker")
+		"clinic_locker":
+			if game.flags.get("locker_open",false):
+				# The corridor door slams behind the scare: the locker ending.
+				game.flags.service_open=false;complete("locker")
+			else:game.player.set_locked(false);game.save_game()
 		"tickets","television":game.player.set_locked(false);game.save_game()
 		_:return false
 	return true
@@ -212,13 +237,37 @@ func jump_home() -> void:
 	if active_tween and active_tween.is_valid():active_tween.kill()
 	game.transitioning=true;game.player.set_locked(true)
 	var token:int=game.session
-	game.audio.play("sfx_roof_jump",-8)
+	# Richard steps onto the trampoline, bounces once and is thrown up through
+	# the torn canvas. In flight he looks back down at the circus while the
+	# picture slowly fades to black under the wind.
+	var camera:Camera3D=game.player.camera
+	var eye_height:float=camera.position.y
+	var breach:Vector3=game.location.stage_show.ROOF_BREACH_CENTER
+	var bed:=Vector3(late.TRAMPOLINE.x,late.ROOF_FLOOR+.68,late.TRAMPOLINE.z)
+	game.player.set_physics_process(false)
 	active_tween=create_tween()
-	active_tween.tween_property(game.player.camera,"position:y",-3.0,.55).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	active_tween.tween_property(game.player,"global_position",bed,.9).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	active_tween.parallel().tween_property(camera,"rotation:x",.35,.9)
+	active_tween.tween_property(camera,"position:y",eye_height-.4,.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	active_tween.tween_callback(func():game.audio.play("sfx_roof_jump",-8))
+	active_tween.tween_property(camera,"position:y",eye_height,.12)
 	await active_tween.finished
 	if token!=game.session:return
-	await game.hud.transition_out()
+	var wind:=AudioStreamPlayer.new();wind.stream=load("res://assets/audio/full_game/sfx_escape_wind.wav")
+	wind.volume_db=-10;add_child(wind);wind.play()
+	active_tween=create_tween()
+	active_tween.tween_property(game.player,"global_position",Vector3(breach.x,breach.y+16.0,breach.z),3.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	# Look back and down into the tent through the tear.
+	active_tween.parallel().tween_property(camera,"rotation:x",-1.25,1.6).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	active_tween.parallel().tween_property(game.player,"rotation:y",game.player.rotation.y+PI,1.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	var fade:ColorRect=game.hud.fade
+	fade.modulate.a=0;fade.show()
+	active_tween.parallel().tween_property(fade,"modulate:a",1.0,2.6).set_delay(1.4)
+	await active_tween.finished
 	if token!=game.session:return
+	var hush:=create_tween();hush.tween_property(wind,"volume_db",-40.0,1.2);hush.tween_callback(wind.queue_free)
+	game.player.set_physics_process(true)
+	camera.position.y=eye_height;camera.rotation.x=0
 	game.phase="home";game.place_player(late.HOME+Vector3(0,0,1.8),late.HOME+Vector3(-2.4,1.3,.3))
 	game.last_safe_position=game.player.position;game.update_staging()
 	await game.hud.transition_in()
@@ -273,9 +322,6 @@ func sync() -> void:
 		game.player.camera.environment=late.home_env
 		if not home_mirror_added:
 			game.mirror_system.add_surface(late.bathroom_glass);home_mirror_added=true
-			var reflection:Dictionary=game.mirror_system.mirrors.back()
-			var resolution:=256 if OS.has_feature("mobile") else 480
-			reflection.viewport.size=Vector2i(resolution,int(resolution*reflection.size.y/reflection.size.x))
 		dress_reflection(not game.flags.get("rope_cut",false))
 	elif game.phase=="roof":game.player.camera.environment=late.roof_env
 	elif game.phase in ["return_arena","roof_access"]:game.player.camera.environment=arena_night_env
@@ -341,7 +387,7 @@ func restore_dialogue_view() -> void:
 		if game.node_id=="0":event("ending_surrounded")
 		elif game.node_id in ["1","2"]:event("ending_operation")
 		elif game.node_id=="3":event("ending_replacement")
-	elif game.sequence_id=="ending_locker" and game.node_id in ["1","2"]:event("locker_scare")
+	elif game.sequence_id in ["ending_locker","clinic_locker"] and game.node_id in ["1","2"]:event("locker_scare")
 	elif game.sequence_id=="trampoline" and game.node_id in ["1","2","3"]:
 		game.player.camera.global_position=late.AUDIENCE_VIEW
 		game.player.camera.look_at(late.AUDIENCE_LOOK)
