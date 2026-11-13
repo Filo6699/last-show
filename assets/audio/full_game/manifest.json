@@ -10,5 +10,9 @@
   "sfx_heartbeat": "res://assets/audio/full_game/sfx_heartbeat.wav",
   "sfx_whisper": "res://assets/audio/full_game/sfx_whisper.wav",
   "sfx_flashlight_click": "res://assets/audio/full_game/sfx_flashlight_click.wav",
-  "sfx_escape_wind": "res://assets/audio/full_game/sfx_escape_wind.wav"
+  "sfx_escape_wind": "res://assets/audio/full_game/sfx_escape_wind.wav",
+  "sfx_breath_a": "res://assets/audio/full_game/sfx_breath_a.wav",
+  "sfx_breath_b": "res://assets/audio/full_game/sfx_breath_b.wav",
+  "sfx_breath_c": "res://assets/audio/full_game/sfx_breath_c.wav",
+  "amb_drone_loop": "res://assets/audio/full_game/amb_drone_loop.wav"
 }

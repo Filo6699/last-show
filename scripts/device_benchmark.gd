@@ -2,10 +2,7 @@ extends Node
 ## On-device performance probe, the main scene of the "perf" export only.
 ## Runs the real game through fixed views and variants that separate the
 ## bottlenecks, then shows a copyable report:
-##   scale 0.5    - if the frame barely changes, pixels/fill rate are not the limit;
-##   lights off   - per-pixel lighting cost;
-##   far 30 m     - cost of distant objects (draw calls);
-##   shadows off  - shadow maps and extra lighting passes.
+## v5: light tiles and narrowed fill lamps against the v4 state, per preset.
 ## "прочее" is frame time minus render CPU time: scripts, physics, waiting.
 var game
 var label: Label
@@ -14,7 +11,7 @@ var report := ""
 var lines: Array[String] = []
 const WARMUP := 60
 const SAMPLES := 180
-const TOTAL := 13
+const TOTAL := 8
 
 func _ready() -> void:
 	var layer := CanvasLayer.new(); layer.layer = 100; add_child(layer)
@@ -79,16 +76,35 @@ func measure(tag: String, phase: String, at: Vector3, facing: Vector3) -> void:
 		gpu.append(RenderingServer.viewport_get_measured_render_time_gpu(rid))
 	var ms := median(frames)
 	var gpu_ms := median(gpu)
-	lines.append("%-18s %5.1f fps | кадр %5.1f p95 %5.1f | cpu-рендер %5.1f | gpu %s | прочее %4.1f | вызовы %4d | треуг %6dk" % [
+	lines.append("%-22s %5.1f fps | кадр %5.1f p95 %5.1f | cpu-рендер %5.1f | gpu %s | прочее %4.1f | вызовы %4d | треуг %6dk" % [
 		tag, 1000.0 / ms, ms, percentile(frames, .95), median(cpu),
 		("%5.1f" % gpu_ms) if gpu_ms > .01 else "  н/д", maxf(0.0, ms - median(cpu)),
 		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 		int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME) / 1000)])
 
-func lights(on: bool) -> void:
+func lights(on: bool) -> void:  # unused in v5, kept for quick probes
 	for light in game.find_children("*", "Light3D", true, false):
 		if light is DirectionalLight3D: continue
 		RenderingServer.instance_set_visible(light.get_instance(), on and light.is_visible_in_tree())
+
+# v5 compares the light tiles and the narrowed fill lamps with the v4 state.
+func tiles(on: bool) -> void:
+	for node in game.world.find_children("*", "MeshInstance3D", true, false):
+		if node.has_meta("light_tile"): node.visible = on
+		elif node.has_meta("light_tiled"): node.layers = 0 if on else int(node.get_meta("light_tiled"))
+
+const OLD_RANGES := {"Practical0": 38.0, "RingAmber": 38.0, "RingIvory": 38.0, "RingCoolRim": 50.0, "GalleryEast": 56.0, "GalleryWest": 56.0, "EntranceBlue": 38.0, "CurtainUplight": 32.0}
+var new_ranges := {}
+func fills(new: bool) -> void:
+	for light in game.find_children("*", "Light3D", true, false):
+		if not OLD_RANGES.has(String(light.name)): continue
+		if not new_ranges.has(light.name): new_ranges[light.name] = light.spot_range if light is SpotLight3D else light.omni_range
+		var reach: float = new_ranges[light.name] if new else OLD_RANGES[String(light.name)]
+		if light is SpotLight3D: light.spot_range = reach
+		else: light.omni_range = reach
+	var env: Environment = game.get_node("World/WorldEnvironment").environment
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY if new else Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_energy = .27 if new else .24
 
 func run() -> void:
 	status("Загрузка игры…")
@@ -100,35 +116,33 @@ func run() -> void:
 	get_tree().root.add_child.call_deferred(game)
 	await get_tree().process_frame
 	for i in 30: await frame()
+	var slicer := get_tree().root.find_child("LightTiles", true, false)
+	while slicer and (not slicer.done or slicer.task >= 0 or not slicer.jobs.is_empty()): await frame()
+	for i in 10: await frame()
 	if game.graphics.changed.is_connected(game.save_settings): game.graphics.changed.disconnect(game.save_settings)
 	game.graphics.fps_limit = 0; game.graphics.show_fps = false
 	var layout = game.layout
-	var opening := [Vector3(0, .36, -5.8), Vector3(0, 1.35, 6.6)]
-	for preset in ["high", "medium", "low"]:
-		game.graphics.set_preset(preset); game.graphics.fps_limit = 0; game.graphics.apply()
-		await measure("начало " + preset, "intro", opening[0], opening[1])
-	# Variants on the low preset isolate the bottleneck.
-	game.graphics.set_option("scale", .5); game.graphics.fps_limit = 0; game.graphics.apply()
-	await measure("начало low x0.5", "intro", opening[0], opening[1])
-	game.graphics.set_preset("low"); game.graphics.fps_limit = 0; game.graphics.apply()
+	var opening := [Vector3(0, .36, -5.8), Vector3(0, 1.35, 6.6), "intro"]
+	var mordecai := [Vector3(-12, .05, 26), layout.ARENA_MORDECAI, "news"]
+	# [tag, view, preset, tiles, new fills]
+	var runs := [
+		["начало high v4", opening, "high", false, false],
+		["начало high плитки", opening, "high", true, false],
+		["начало high плитки+залив", opening, "high", true, true],
+		["начало medium новое", opening, "medium", true, true],
+		["начало low новое", opening, "low", true, true],
+		["Мордекай high v4", mordecai, "high", false, false],
+		["Мордекай high новое", mordecai, "high", true, true],
+		["начало high v4 повтор", opening, "high", false, false],
+	]
+	for entry in runs:
+		game.graphics.set_preset(entry[2]); game.graphics.fps_limit = 0; game.graphics.apply()
+		tiles(entry[3]); fills(entry[4])
+		var view: Array = entry[1]
+		await measure(entry[0], view[2], view[0], view[1])
+	tiles(true); fills(true)
 	var culling := get_tree().root.find_child("ZoneCulling", true, false)
-	lights(false)
-	await measure("начало без ламп", "intro", opening[0], opening[1])
-	lights(true)
-	var camera: Camera3D = game.player.camera
-	var far := camera.far
-	camera.far = 30
-	await measure("начало дальн.30м", "intro", opening[0], opening[1])
-	camera.far = far
-	game.graphics.set_preset("high"); game.graphics.fps_limit = 0; game.graphics.apply()
-	game.graphics.set_option("shadows", 0); game.graphics.fps_limit = 0; game.graphics.apply()
-	await measure("начало high б/теней", "intro", opening[0], opening[1])
-	for preset in ["high", "low"]:
-		game.graphics.set_preset(preset); game.graphics.fps_limit = 0; game.graphics.apply()
-		await measure("Мордекай " + preset, "news", Vector3(-12, .05, 26), layout.ARENA_MORDECAI)
-		await measure("зеркало " + preset, "elsa_dressing", Vector3(-46, .05, 33.6), layout.MIRROR)
-		await measure("клиника " + preset, "photos", layout.CLINIC_CENTER + Vector3(.4, 0, 0), layout.PHOTOS)
-	var header := "Last Show perf | %s | %s | %s | экран %s | 3D %.2f | зональное отсечение: %s" % [
+	var header := "Last Show perf v5 | %s | %s | %s | экран %s | 3D %.2f | зональное отсечение: %s" % [
 		OS.get_model_name(), RenderingServer.get_video_adapter_name(), RenderingServer.get_current_rendering_method(),
 		str(DisplayServer.window_get_size()), get_viewport().scaling_3d_scale, "да" if culling else "нет"]
 	report = header + "\n" + "\n".join(lines)

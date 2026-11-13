@@ -15,7 +15,9 @@ func setup(owner_game) -> void:
 	configure_environment()
 	# These ten anchors also serve the existing rigging/flicker sound cues.
 	var practicals := [
-		[Vector3(0,7,0),"c8c8bf",.50,38.0],
+		# The ring pendant once reached 38 m as a tent-wide fill; every lamp
+		# reaching a pixel costs it, so it stays short and the tent stays dark.
+		[Vector3(0,7,0),"c8c8bf",.50,14.0],
 		[Vector3(-12,3.8,29),"ffbc72",.75,6.5],
 		[Vector3(game.layout.SERVICE_X,2.74,40.8),"ffc181",.85,6.0],
 		[Vector3(-41.3,2.8,36.6),"ffd29a",1.15,6.0],
@@ -55,22 +57,22 @@ func setup(owner_game) -> void:
 	for collider in game.model.get_node("GeometryCollisions").get_children():
 		if annex_lamp.call(String(collider.get_meta("source_mesh",""))):collider.collision_layer=0
 	# Warm crossed keys pick out the ring instead of lighting the entire tent evenly.
-	spot("RingAmber",Vector3(-9,10,-5),Vector3(1,0,2),"f5dfbf",3.6,38,48,true,true)
-	spot("RingIvory",Vector3(9,11,6),Vector3(-2,0,-1),"ebe3d0",1.8,38,55,false,true)
-	spot("RingCoolRim",Vector3(2,15,-3),Vector3(0,1,6),"b4c5d0",1.4,50,68,false,false)
+	spot("RingAmber",Vector3(-9,10,-5),Vector3(1,0,2),"f5dfbf",3.6,26,48,true,true)
+	spot("RingIvory",Vector3(9,11,6),Vector3(-2,0,-1),"ebe3d0",1.8,26,55,false,true)
+	spot("RingCoolRim",Vector3(2,15,-3),Vector3(0,1,6),"b4c5d0",1.4,30,68,false,false)
 	spot("StageKey",Vector3(0,7,-3.5),Vector3(0,.4,-6.2),"f5ddbb",3.4,23,52,true,true)
 	spot("BackstageKey",Vector3(-12,7,26),Vector3(-12,1,29),"ead2b4",2.1,22,42,true,false)
 	# Grazing fills reveal the stepped gallery rather than whitening every wall.
-	spot("GalleryEast",Vector3(4,11,1),Vector3(34,4,16),"bac5ce",1.25,56,58,false,false)
-	spot("GalleryWest",Vector3(-5,12,0),Vector3(-32,4,16),"c9bca9",1.10,56,58,false,false)
+	spot("GalleryEast",Vector3(4,11,1),Vector3(34,4,16),"bac5ce",1.25,44,58,false,false)
+	spot("GalleryWest",Vector3(-5,12,0),Vector3(-32,4,16),"c9bca9",1.10,44,58,false,false)
 	spot("ServiceApproach",Vector3(game.layout.SERVICE_X,6,game.layout.SERVICE_START-5),Vector3(game.layout.SERVICE_X,0,game.layout.SERVICE_START-2),"e6d4b9",1.8,21,60,false,false)
 	spot("TrainingKey",Vector3(-10,8,16),Vector3(-18,1,23),"e8d4b7",2.0,25,58,true,false)
 	spot("StorageKey",Vector3(18.5,4.8,-4.3),Vector3(24,1,-9),"ead6b9",2.5,22,54,true,false)
 	spot("DressingKey",Vector3(-49,5.8,35),Vector3(-44,1.3,38),"eed7b8",1.1,18,70,true,false)
 	spot("ClinicTask",game.layout.CLINIC_CENTER+Vector3(0,2.8,0),game.layout.CLINIC_CENTER+Vector3(.9,.7,1.4),"e3e8dd",1.35,7,68,true,false,true,false)
 	# The distant entrance reads as a cold silhouette, with the roof falling into haze.
-	spot("EntranceBlue",Vector3(47,5,20),Vector3(31,0,13),"b4c9d3",2.6,38,50,false,false)
-	spot("CurtainUplight",Vector3(0,1,-7.8),Vector3(0,12,-19),"b37b54",.85,32,45,false,false,false)
+	spot("EntranceBlue",Vector3(47,5,20),Vector3(31,0,13),"b4c9d3",2.6,26,50,false,false)
+	spot("CurtainUplight",Vector3(0,1,-7.8),Vector3(0,12,-19),"b37b54",.85,22,45,false,false,false)
 	# No vanity bulbs: they hung on the oval mirror frames, and mirrors.gd strips
 	# the glass and frame from every vanity (the story mirror is the standing one),
 	# so bulbs placed there would float against the canvas.
@@ -80,6 +82,11 @@ func setup(owner_game) -> void:
 func configure_environment() -> void:
 	var environment: Environment=game.get_node("World/WorldEnvironment").environment
 	environment.background_color=Color(.009,.014,.023)
+	# Flat dim ambient, as before the perf pass: the gradient sky lit the tent
+	# too evenly. The shorter lamp ranges from that pass stay.
+	environment.sky=null
+	environment.ambient_light_source=Environment.AMBIENT_SOURCE_COLOR
+	environment.reflected_light_source=Environment.REFLECTION_SOURCE_DISABLED
 	environment.ambient_light_color=Color("b4bdc5")
 	environment.ambient_light_energy=.24
 	environment.tonemap_mode=Environment.TONE_MAPPER_LINEAR
@@ -218,6 +225,7 @@ func sync() -> void:
 		elif light in show_spots:energy*=1.0 if mode==1 else (.0 if mode==2 else .78)
 		if first:light.light_energy=energy
 		else:show_fade.tween_property(light,"light_energy",energy,2.0)
+		dim(light,energy,first)
 		var beam:ShaderMaterial=light.get_meta("beam_material") if light.has_meta("beam_material") else null
 		if beam:
 			if first:beam.set_shader_parameter("strength",1.0 if mode==1 else (.0 if mode==2 else .78))
@@ -227,7 +235,19 @@ func sync() -> void:
 		var energy:float=.025 if mode==2 else float(light.get_meta("rest_energy"))
 		if first:light.light_energy=energy
 		else:show_fade.tween_property(light,"light_energy",energy,2.0)
+		dim(light,energy,first)
 	if first:show_fade.kill()
+
+# A light at zero energy still costs every pixel it reaches, so lights faded
+# out for the late story leave the scene once the fade ends.
+func dim(light: Light3D, energy: float, first: bool) -> void:
+	if light.name=="ClinicTask" and not light.visible:return
+	if energy>.001:
+		light.visible=true
+	elif first:
+		light.visible=false
+	else:
+		show_fade.tween_callback(func():if is_instance_valid(light) and light.light_energy<=.001:light.visible=false).set_delay(2.0)
 
 func pause_motion(value: bool) -> void:
 	if value:

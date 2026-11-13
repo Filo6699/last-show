@@ -12,6 +12,7 @@ var late:Node3D
 var home_mirror_added:=false
 var game
 var active_tween:Tween
+var note_view:CanvasLayer
 var apparition:Node3D
 var progress_path:="user://last-show-endings.json"
 var old_phase:=""
@@ -21,6 +22,7 @@ var stage_body:Mesh
 var home_body:Mesh
 var hidden_show_lights:Dictionary={}
 var arena_night_env:Environment
+var knife_throw:Node3D
 
 func setup(owner_game) -> void:
 	game=owner_game;name="FullScenario"
@@ -29,6 +31,7 @@ func setup(owner_game) -> void:
 	home_body=ordinary.find_child("Body",true,false).mesh;ordinary.free()
 	set_dressing=preload("res://scripts/circus_set.gd").new();add_child(set_dressing);set_dressing.setup(game)
 	late=preload("res://scripts/late_locations.gd").new();add_child(late);late.setup(game)
+	knife_throw=preload("res://scripts/knife_throw.gd").new();add_child(knife_throw);knife_throw.setup(game)
 	arena_night_env=game.get_node("World/WorldEnvironment").environment.duplicate()
 	arena_night_env.ambient_light_energy=.12;arena_night_env.fog_depth_begin=10;arena_night_env.fog_depth_end=75
 
@@ -85,8 +88,10 @@ func interact(id:StringName) -> bool:
 				game.flags.knife=true;game.audio.play("sfx_knife_pickup",-9,game.layout.TRUNK)
 				game.hud.show_item_card("knife","Как он тут оказался?")
 				sync();game.save_game()
+		"knife_throw": knife_throw.start()
 		"tickets": game.audio.ui()
-		"television": game.start_dialogue("television")
+		"television":
+			set_dressing.play_television();game.start_dialogue("television")
 		"contract":
 			if game.phase=="contract":game.start_dialogue("walter_contract")
 		"roof_key":
@@ -108,6 +113,10 @@ func interact(id:StringName) -> bool:
 		"roof_rope":
 			if not game.flags.get("rope_cut",false):game.start_dialogue("roof_rope")
 		"trampoline":game.start_dialogue("trampoline")
+		"roof_note":
+			if not is_instance_valid(note_view):
+				note_view=preload("res://scripts/roof_note.gd").new();add_child(note_view);note_view.setup(game)
+			note_view.open()
 		"home_mirror":
 			if game.phase=="home":
 				game.phase="bathroom";game.update_staging()
@@ -202,7 +211,7 @@ func event(id:String) -> bool:
 			game.audio.play("sfx_applause",-12)
 		"locker_rattle":
 			var hinge: Node3D = set_dressing.locker.get_meta("hinge")
-			var scrape: Node = game.audio.play("sfx_service_door_open", -20, set_dressing.locker.global_position)
+			var scrape: Node = game.audio.play("sfx_service_door_open", 0, set_dressing.locker.global_position, "SFX", -8)
 			scrape.pitch_scale = .55
 			if active_tween and active_tween.is_valid(): active_tween.kill()
 			active_tween = create_tween()
@@ -215,13 +224,12 @@ func event(id:String) -> bool:
 			apparition.position=set_dressing.locker.position+Vector3(0,-1.1,-.8)
 			apparition.look_at(Vector3(game.player.position.x,apparition.position.y,game.player.position.z),Vector3.UP,true)
 			set_dressing.locker.collision_layer=0
-			game.audio.play("sfx_service_door_open", -5, set_dressing.locker.global_position)
+			game.audio.play("sfx_service_door_open", 0, set_dressing.locker.global_position, "SFX", 8)
 			if active_tween and active_tween.is_valid(): active_tween.kill()
 			active_tween = create_tween()
 			active_tween.tween_property(set_dressing.locker.get_meta("hinge"), "rotation:y", 1.45, .16)
 			game.frame_player_at(apparition.position+Vector3(0,1.25,0),.15)
 			game.sound("lili_glimpse")
-			get_tree().create_timer(.3).timeout.connect(func(): if is_instance_valid(game): game.screamer.play())
 		_:return false
 	return true
 
@@ -284,13 +292,13 @@ func jump_home() -> void:
 	active_tween.tween_property(camera,"position:y",eye_height-.12,.15)
 	active_tween.tween_property(camera,"position:y",eye_height,.25)
 	# 4. Up, into the tear.
-	var pitch_up:=1.42
+	var pitch_up:=1.5
 	active_tween.tween_property(camera,"rotation:x",pitch_up,1.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	active_tween.tween_interval(.8)
 	# 5. Two small bounces, then the throw.
 	for height in [.35,.7]:
 		active_tween.tween_property(camera,"position:y",eye_height-.3,.18).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-		active_tween.tween_callback(func():game.audio.play("sfx_roof_jump",-12))
+		active_tween.tween_callback(func():game.audio.play("sfx_roof_jump",0,Vector3.INF,"SFX",-8))
 		active_tween.tween_property(player,"global_position:y",bed.y+height,.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		active_tween.parallel().tween_property(camera,"position:y",eye_height,.15)
 		active_tween.tween_property(player,"global_position:y",bed.y,.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
@@ -300,23 +308,55 @@ func jump_home() -> void:
 	if token!=game.session:return
 	var wind:=AudioStreamPlayer.new();wind.stream=load("res://assets/audio/full_game/sfx_escape_wind.wav")
 	wind.volume_db=-10;add_child(wind);wind.play()
-	# 6. Straight up through the tear and out into the night.
+	# 6. Straight up through the tear and out into the night. The eyes stay
+	# on the hole the whole way: it grows, its torn rim slides past the edges
+	# of the frame, then the head tips forward only as far as the night sky
+	# and the moon, never back down into the circus.
+	var sky:=night_sky(breach,player.rotation.y)
+	var below:=Vector3(breach.x,breach.y-eye_height-.6,breach.z)
+	var above:=Vector3(breach.x,breach.y-eye_height+3.0,breach.z)
+	var top:=Vector3(breach.x,breach.y-eye_height+9.0,breach.z)
 	active_tween=create_tween()
 	active_tween.tween_property(camera,"position:y",eye_height,.2)
-	active_tween.parallel().tween_property(player,"global_position",Vector3(breach.x,breach.y+14.0,breach.z),2.4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	active_tween.parallel().tween_property(player,"global_position",below,1.1).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	active_tween.tween_property(player,"global_position",above,1.0)
+	active_tween.tween_property(player,"global_position",top,2.6).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	active_tween.parallel().tween_property(camera,"rotation:x",.42,2.2).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	var fade:ColorRect=game.hud.fade
 	fade.modulate.a=0;fade.show()
-	active_tween.parallel().tween_property(fade,"modulate:a",1.0,1.6).set_delay(1.3)
+	active_tween.parallel().tween_property(fade,"modulate:a",1.0,1.2).set_delay(1.6)
 	await active_tween.finished
+	sky.queue_free()
 	if token!=game.session:return
 	var hush:=create_tween();hush.tween_property(wind,"volume_db",-40.0,1.2);hush.tween_callback(wind.queue_free)
 	player.set_physics_process(true)
 	camera.position.y=eye_height;camera.rotation.x=0
-	game.phase="home";game.place_player(late.HOME+Vector3(0,0,1.8),late.HOME+Vector3(-2.4,1.3,.3))
+	game.phase="home";game.place_player(late.HOME+Vector3(0,0,1.8),late.HOME+Vector3(-3.1,.9,2.6))
 	game.last_safe_position=player.position;game.update_staging()
 	await game.hud.transition_in()
 	if token!=game.session:return
 	game.transitioning=false;game.start_dialogue("wake_home")
+
+## Stars and a moon over the tent for the few seconds of the jump. Unshaded and
+## fog-free so they read against the dark roof environment.
+func night_sky(center:Vector3,yaw:float) -> Node3D:
+	var sky:=Node3D.new();sky.name="JumpNightSky";add_child(sky)
+	var star_material:=StandardMaterial3D.new()
+	star_material.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED;star_material.disable_fog=true
+	star_material.billboard_mode=BaseMaterial3D.BILLBOARD_ENABLED;star_material.albedo_color=Color("dfe6f2")
+	var quad:=QuadMesh.new();quad.size=Vector2(.35,.35);quad.material=star_material
+	var multi:=MultiMesh.new();multi.transform_format=MultiMesh.TRANSFORM_3D;multi.mesh=quad;multi.instance_count=420
+	var rng:=RandomNumberGenerator.new();rng.seed=1907
+	for i in multi.instance_count:
+		var direction:=Vector3(rng.randf_range(-1,1),rng.randf_range(.05,1),rng.randf_range(-1,1)).normalized()
+		var size:=rng.randf_range(.5,1.4)
+		multi.set_instance_transform(i,Transform3D(Basis.IDENTITY.scaled(Vector3.ONE*size),center+direction*110))
+	var stars:=MultiMeshInstance3D.new();stars.multimesh=multi;stars.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF;sky.add_child(stars)
+	var moon:=MeshInstance3D.new();var disc:=SphereMesh.new();disc.radius=7;disc.height=14;moon.mesh=disc
+	var moon_material:=StandardMaterial3D.new();moon_material.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED;moon_material.disable_fog=true
+	moon_material.albedo_color=Color("e9e4cf");moon.material_override=moon_material;moon.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	moon.position=center+Basis(Vector3.UP,yaw)*Vector3(0,0,-1)*100+Vector3(0,58,0);sky.add_child(moon)
+	return sky
 
 func dress_reflection(host:bool) -> void:
 	var avatar:Node3D=game.mirror_system.avatar
@@ -394,12 +434,24 @@ func check_walk_progress() -> void:
 		game.phase="roof_access";game.update_staging();game.save_game()
 		game.audio.emote("mordecai_smile")
 		game.hud.show_notice("Ричард… Не опоздай.")
+	# First good look at the knife in the open trunk: one thought hints at its use.
+	var knife:Node3D=set_dressing.knife if is_instance_valid(set_dressing) else null
+	if knife and knife.visible and not game.flags.get("knife_noticed",false) and not game.hud.dialog.visible:
+		var eye:Vector3=game.player.camera.global_position
+		var to_knife:Vector3=knife.global_position-eye
+		if to_knife.length()<5.0 and to_knife.normalized().dot(-game.player.camera.global_basis.z)>.9:
+			game.flags["knife_noticed"]=true
+			game.hud.show_notice("Нож в сундуке Лили. Заберу: вдруг придётся что-то перерезать.")
 	if game.phase=="roof" and game.player.position.y<late.ROOF_FLOOR-1:
 		game.place_player(late.ROOF_ENTRY,late.ROPE)
 
 func reset_motion() -> void:
+	if is_instance_valid(knife_throw):knife_throw.close()
 	if is_instance_valid(set_dressing):set_dressing.arena_details.reset_motion()
 	if active_tween and active_tween.is_valid():active_tween.kill()
+	if is_instance_valid(note_view):note_view.reset()
+	var jump_sky:=find_child("JumpNightSky",false,false)
+	if jump_sky:jump_sky.queue_free()
 	if is_instance_valid(apparition):apparition.queue_free()
 	apparition=null
 	if is_instance_valid(late):late.medicine_bag.position=Vector3.ZERO

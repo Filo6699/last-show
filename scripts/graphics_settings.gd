@@ -6,6 +6,13 @@ const PRESETS := {
 	"low": {"aa": 0, "scale": .75, "shadows": 0},
 	"medium": {"aa": 2, "scale": 1.0, "shadows": 1},
 	"high": {"aa": 2, "scale": 1.0, "shadows": 2}}
+# On a Mali-G615 MSAA 2x alone took the opening from 27 to 40 ms per frame
+# (tile GPUs resolve it through memory), so phone presets render without it.
+# Players can still pick MSAA by hand.
+const MOBILE_PRESETS := {
+	"low": {"aa": 0, "scale": .75, "shadows": 0},
+	"medium": {"aa": 0, "scale": 1.0, "shadows": 1},
+	"high": {"aa": 0, "scale": 1.0, "shadows": 2}}
 # Off, FXAA (post-process, cheap), MSAA 2×, MSAA 4×.
 const AA_MSAA := [Viewport.MSAA_DISABLED, Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X]
 const SCALES := [.5, .7, .85, 1.0]
@@ -46,7 +53,7 @@ var fps_clock := 0.0
 func setup(owner_game) -> void:
 	game = owner_game
 	# MSAA costs fill rate; start at 2× everywhere and let players raise it.
-	var defaults: Dictionary = PRESETS["medium"]
+	var defaults: Dictionary = presets()["medium"]
 	preset = "medium"
 	aa = defaults.aa; scale = defaults.scale; shadows = defaults.shadows
 	get_window().size_changed.connect(apply_scale)
@@ -93,20 +100,27 @@ func load_dict(values: Dictionary) -> void:
 	grain = clampi(int(values.get("grain", grain)), 0, 2)
 	darkness = clampi(int(values.get("darkness", darkness)), 0, 2)
 	haze = clampi(int(values.get("haze", haze)), 0, 2)
+	# A named preset follows the current table, so saves made before the phone
+	# presets dropped MSAA pick up the change.
+	if preset != "custom":
+		var table := presets()
+		aa = table[preset].aa; scale = table[preset].scale; shadows = table[preset].shadows
 	apply()
 
 func set_preset(id: String) -> void:
-	if not PRESETS.has(id): return
+	var table := presets()
+	if not table.has(id): return
 	preset = id
-	aa = PRESETS[id].aa; scale = PRESETS[id].scale; shadows = PRESETS[id].shadows
+	aa = table[id].aa; scale = table[id].scale; shadows = table[id].shadows
 	apply()
 
 func set_option(option: String, value) -> void:
 	set(option, value)
 	if option in ["aa", "scale", "shadows"]:
 		preset = "custom"
-		for id in PRESETS:
-			if PRESETS[id].aa == aa and is_equal_approx(PRESETS[id].scale, scale) and PRESETS[id].shadows == shadows: preset = id
+		var table := presets()
+		for id in table:
+			if table[id].aa == aa and is_equal_approx(table[id].scale, scale) and table[id].shadows == shadows: preset = id
 	apply()
 
 func apply() -> void:
@@ -124,6 +138,9 @@ func apply() -> void:
 	veil.material.set_shader_parameter("vignette", VIGNETTE_AMOUNT[darkness])
 	apply_scale()
 	changed.emit()
+
+func presets() -> Dictionary:
+	return MOBILE_PRESETS if mobile else PRESETS
 
 func shadow_light_count() -> int:
 	return SHADOW_LIGHTS[shadows]

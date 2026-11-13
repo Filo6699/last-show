@@ -27,7 +27,11 @@ var _interaction_session := -1
 var held := false
 
 func interact() -> void:
-	if not _ready_setup or fallen or game.phase != "photos" or game.transitioning:
+	if not _ready_setup or fallen or game.transitioning:
+		return
+	if game.phase != "photos":
+		# Later clinic phases: just look at the torn photo on the wall.
+		game.inspect_photo("child")
 		return
 	_interaction_session = int(game.session)
 	held = false

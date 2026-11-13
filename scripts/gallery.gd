@@ -304,7 +304,7 @@ func aisle(angle: float) -> void:
 	# underside. The upper landing meets the actual 6m gallery floor.
 	var normal := Vector3(sin(angle), 0, cos(angle))
 	var tangent := Vector3(cos(angle), 0, -sin(angle)) * .86
-	var entry := normal * 32.0 + Vector3(0, .075, 0)
+	var entry := normal * 32.0 + Vector3(0, .01, 0)
 	var start := normal * 33.1 + Vector3(0, .075, 0)
 	var end := normal * 45.5 + Vector3(0, 6.05, 0)
 	# The source deck's aisle cut runs about half a metre past the ramp top.
@@ -315,7 +315,7 @@ func aisle(angle: float) -> void:
 		var first: Vector3 = ends[0]; var last: Vector3 = ends[1]
 		var bottom: Array[Vector3] = []
 		for point in [first-tangent,first+tangent,last-tangent,last+tangent]:
-			var floor_y := .015
+			var floor_y := -.05
 			# A real covered service passage crosses beneath this particular
 			# aisle. Its deck stays solid without blocking the ground route.
 			if absf(wrapf(angle - 11*TAU/12,-PI,PI)) < .01:
@@ -341,3 +341,11 @@ func aisle(angle: float) -> void:
 		bounds.size = Vector3(.1, 1.2, start.distance_to(end) + .2); guard.shape = bounds
 		guard.transform = Transform3D(Basis(side_axis, up, forward), (start + end) * .5 + up * .6 + side_axis * side * .93)
 		guard_body.add_child(guard)
+		# The tilted rail leans over the foot of the stairs: its top edge sits
+		# about half a metre before the ramp. A round post right under that
+		# edge makes a visitor beside the stairs slide onto them, not stick.
+		var tip: Vector3 = (start + end) * .5 + up * 1.2 + forward * (start.distance_to(end) + .2) * .5 + side_axis * side * .93
+		var post := CollisionShape3D.new(); var post_shape := CylinderShape3D.new()
+		post_shape.radius = .2; post_shape.height = maxf(tip.y, .3); post.shape = post_shape
+		post.position = Vector3(tip.x, post_shape.height * .5, tip.z)
+		guard_body.add_child(post)

@@ -346,7 +346,8 @@ func build_passage() -> void:
 			poster.sign_text("LAST SHOW",Vector3(0,-.52,.025),.68,0,"563a3c")
 	# Low cloth canopy only covers the main-tent side of the join. Its edges sit
 	# inside the prepared opening; the real dressing tent canvas forms the exit.
-	var canopy:=parts.box(Vector3(5.15,3.29,0),Vector3(10.3,.16,2.92),"423b3c")
+	# It runs on to the dressing canvas so no sky shows above the entrance.
+	var canopy:=parts.box(Vector3(6.0,3.29,0),Vector3(12.0,.16,2.92),"423b3c")
 	canopy.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	# The narrow runner and broken brass borders gently bend left around the
 	# authored dressing table at the right-hand mouth. No collision is added.

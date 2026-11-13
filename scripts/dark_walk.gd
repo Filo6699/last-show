@@ -29,8 +29,11 @@ var panic := 0.0
 var spawn_wait := 2.0
 var flicker_wait := 0.0
 var beam_off := 0.0
+var drawing := false
+var draw_token := 0
 var heart_wait := 0.0
 var breath: AudioStreamPlayer
+var breath_wait := 3.0
 var overlay: CanvasLayer
 var vignette := ShaderMaterial.new()
 var lunge: Sprite3D
@@ -88,9 +91,8 @@ func _process(delta: float) -> void:
 
 func begin() -> void:
 	active = true
-	flashlight.visible = true
-	game.audio.play("sfx_flashlight_click", -10)
 	overlay.visible = true
+	draw_flashlight()
 	# Kill every light outside the clinic; the beam is all Richard has.
 	var clinic := AABB(Vector3(-24, -1, 53.5), Vector3(8, 6, 7))
 	for light in game.world.find_children("*", "Light3D", true, false):
@@ -101,15 +103,12 @@ func begin() -> void:
 	if env:
 		env.ambient_light_energy = .035
 		env.fog_light_color = Color(.01, .012, .02)
-	breath = AudioStreamPlayer.new()
-	breath.stream = game.audio.loop_stream("sfx_breath_panic")
-	breath.bus = "SFX"
-	breath.volume_db = -40
-	add_child(breath)
-	breath.play()
+	breath_wait = 3.0
 
 func finish() -> void:
 	active = false
+	drawing = false
+	draw_token += 1
 	flashlight.visible = false
 	overlay.visible = false
 	for light in dimmed:
@@ -123,16 +122,44 @@ func finish() -> void:
 	game.player.camera.h_offset = 0
 	game.player.camera.v_offset = 0
 	if is_instance_valid(breath): breath.queue_free()
+	breath = null
 
 # Called on new game / load so a fresh run never inherits the dark.
 func reset() -> void:
 	if active: finish()
 
+# The lights die first. Richard stands in the dark for a moment, then fumbles
+# the torch out of his coat and lifts the beam from his feet to eye level.
+func draw_flashlight() -> void:
+	draw_token += 1
+	var token := draw_token
+	drawing = true
+	flashlight.visible = false
+	await get_tree().create_timer(1.0).timeout
+	if token != draw_token: return
+	game.hud.show_notice("Темно. Фонарь… где-то в кармане.")
+	await get_tree().create_timer(2.0).timeout
+	if token != draw_token: return
+	game.audio.play("sfx_flashlight_click", 0, Vector3.INF, "SFX", 2)
+	flashlight.rotation.x = -1.1
+	flashlight.light_energy = 0.0
+	flashlight.visible = true
+	var tween := create_tween().set_parallel(true)
+	tween.tween_property(flashlight, "rotation:x", 0.0, .7).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	var energy := create_tween()
+	for level in [1.6, .2, 2.4, .6, 3.2]:
+		energy.tween_property(flashlight, "light_energy", level, .07)
+	await energy.finished
+	if token != draw_token: return
+	drawing = false
+	flicker_wait = 3.0
+
 func update_beam(delta: float) -> void:
+	if drawing: return
 	if beam_off > 0:
 		beam_off -= delta
 		flashlight.visible = beam_off <= 0
-		if beam_off <= 0: game.audio.play("sfx_flashlight_click", -10)
+		if beam_off <= 0: game.audio.play("sfx_flashlight_click", 0, Vector3.INF, "SFX", 2)
 		return
 	# Panic makes the old bulb stutter.
 	flicker_wait -= delta
@@ -149,7 +176,7 @@ func update_beam(delta: float) -> void:
 func kill_beam(seconds: float) -> void:
 	beam_off = seconds
 	flashlight.visible = false
-	game.audio.play("sfx_flashlight_click", -8)
+	game.audio.play("sfx_flashlight_click", 0, Vector3.INF, "SFX", 4)
 
 func eye() -> Vector3:
 	return game.player.camera.global_position
@@ -221,7 +248,7 @@ func update_figures(delta: float, story_busy: bool) -> void:
 
 func vanish(figure: Sprite3D) -> void:
 	figure.set_meta("leaving", true)
-	game.audio.play("sfx_whisper", -16, figure.global_position + Vector3.UP * 1.6)
+	game.audio.play("sfx_whisper", 0, figure.global_position + Vector3.UP * 1.6, "SFX", -4)
 	panic = minf(1.0, panic + .12)
 	var tween := create_tween()
 	tween.tween_property(figure, "modulate:a", 0.0, .12)
@@ -230,7 +257,6 @@ func vanish(figure: Sprite3D) -> void:
 		figure.queue_free())
 
 func jump_scare(line: String) -> void:
-	game.screamer.play()
 	game.shake_camera(.06)
 	game.audio.cue("lili_glimpse")
 	panic = 1.0
@@ -249,7 +275,7 @@ func staged_scares() -> void:
 			at.y = p.y - .36
 			if clear_line(eye(), at + Vector3.UP * 1.7): make_figure(at)
 		panic = .8
-		game.audio.play("sfx_heartbeat", -4)
+		game.audio.play("sfx_heartbeat", 0, Vector3.INF, "SFX", 8)
 		get_tree().create_timer(2.3).timeout.connect(func():
 			if not active: return
 			for figure in figures.duplicate():
@@ -264,7 +290,7 @@ func staged_scares() -> void:
 		var at := p + back.normalized() * 1.6
 		at.y = p.y - .36
 		lunge = make_figure(at)
-		game.audio.play("sfx_whisper", -6, at + Vector3.UP * 1.6)
+		game.audio.play("sfx_whisper", 0, at + Vector3.UP * 1.6, "SFX", 8)
 		game.hud.show_notice("Сзади кто-то дышит.")
 	if lunge and is_instance_valid(lunge):
 		# It follows him until he turns round.
@@ -278,6 +304,21 @@ func staged_scares() -> void:
 		panic = maxf(panic, .7)
 		game.hud.show_notice("Наверх. Быстрее наверх.")
 
+# Single human breaths (inhale then exhale) instead of a loop: silent while calm, fading in
+# with panic, faster and a little louder when scared, never on a fixed rhythm.
+func update_breath(delta: float) -> void:
+	breath_wait -= delta
+	if breath_wait > 0 or panic < .18: return
+	if is_instance_valid(breath) and breath.playing:
+		breath_wait = .3
+		return
+	var amount := smoothstep(.18, 1.0, panic)
+	breath_wait = lerpf(3.8, 1.7, amount) * randf_range(.8, 1.35)
+	var id: String = ["sfx_breath_a", "sfx_breath_b", "sfx_breath_c"][randi() % 3]
+	var node: Node = game.audio.play(id, 0, Vector3.INF, "SFX", lerpf(-8.0, 3.0, amount) + randf_range(-2.0, 1.0))
+	node.pitch_scale = randf_range(.9, 1.08) + amount * .12
+	breath = node as AudioStreamPlayer
+
 func update_panic(delta: float) -> void:
 	var near := 0
 	for figure in figures:
@@ -286,11 +327,11 @@ func update_panic(delta: float) -> void:
 	panic = move_toward(panic, maxf(target, 0.0), delta * (.12 if panic > target else .05))
 	vignette.set_shader_parameter("panic", panic)
 	vignette.set_shader_parameter("pulse", .5 + .5 * sin(Time.get_ticks_msec() * .001 * TAU * (1.2 + panic * 1.4)))
-	if is_instance_valid(breath): breath.volume_db = lerpf(-34.0, -7.0, panic)
+	update_breath(delta)
 	heart_wait -= delta
 	if heart_wait <= 0 and panic > .35:
 		heart_wait = lerpf(1.1, .45, panic)
-		var beat: Node = game.audio.play("sfx_heartbeat", lerpf(-16.0, -3.0, panic))
+		var beat: Node = game.audio.play("sfx_heartbeat", 0, Vector3.INF, "SFX", lerpf(-10.0, 2.0, panic))
 		beat.pitch_scale = 1.0 + panic * .3
 	var tremor := panic * panic * .012
 	var t := Time.get_ticks_msec() * .001

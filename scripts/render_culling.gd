@@ -22,6 +22,9 @@ func setup(owner_game) -> void:
 	# build_occluders() culled the tent roof when looking up, leaving a white screen.
 	for id in game.actors: watch_actor(game.actors[id])
 	build_room_occluders()
+	# Added before ZoneCulling so tiles exist when the zones collect geometry.
+	var tiles := preload("res://scripts/light_tiles.gd").new()
+	tiles.name = "LightTiles"; add_child(tiles); tiles.setup(game)
 	var zones := preload("res://scripts/zone_culling.gd").new()
 	zones.name = "ZoneCulling"; add_child(zones); zones.setup(game)
 	for light in game.find_children("*", "Light3D", true, false):

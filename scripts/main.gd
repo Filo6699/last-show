@@ -6,6 +6,7 @@ const SAVE_PATH := "user://chapter_one.json"
 const SETTINGS_PATH := "user://settings.json"
 const AUDIO_ENABLED := true
 const layout = preload("res://scripts/chapter_layout.gd")
+const CLINIC_PHASES := ["photos", "walter", "contract", "roof_key"]
 const VALID_PHASES := ["intro", "news", "to_dressing", "mirror", "elsa_dressing", "to_hall", "lili", "bruno", "elsa_hall", "to_technical", "technical", "photos", "walter", "contract", "roof_key", "return_arena", "roof_access", "roof", "home", "bathroom", "trapped", "captured", "complete"]
 @onready var world: Node3D = $World
 @onready var model: Node3D = $World/CircusLayout/Model
@@ -26,7 +27,6 @@ var lockpick: CanvasLayer
 var opening: CanvasLayer
 # Tests that drive the story from the first line turn the cutscene off.
 var opening_enabled := true
-var screamer: CanvasLayer
 var photo_comparison := ""
 var actors: Dictionary = {}
 var targets: Dictionary = {}
@@ -80,8 +80,6 @@ func _ready() -> void:
 	photo_puzzle.game = self
 	add_child(photo_puzzle)
 	photo_puzzle.closed.connect(on_puzzle_closed)
-	screamer = preload("res://scripts/screamer.gd").new()
-	add_child(screamer)
 	opening = preload("res://scripts/opening_cutscene.gd").new()
 	add_child(opening)
 	opening.setup(self)
@@ -281,7 +279,7 @@ func on_interact(id: StringName) -> void:
 					sound("locked")
 					hud.show_notice("Дверь заперта снаружи.")
 				else:
-					start_lockpick("service", 5)
+					start_lockpick("service", 3)
 			elif not flags.get("service_open",false):
 				sound("locked")
 				hud.show_notice("Замок закрыт. Нужен способ открыть его.")
@@ -315,8 +313,13 @@ func enter_photo_inspection() -> void:
 	hud.close_dialog()
 	player.set_locked(false)
 
+# Wall photos and torn-photo puzzles stay available for the whole clinic visit,
+# but never while a dialogue line or another overlay owns the screen.
+func photos_available() -> bool:
+	return phase in CLINIC_PHASES and not transitioning and sequence_id.is_empty() and not hud.menu.visible and photo_puzzle.active == "" and not (is_instance_valid(lockpick) and lockpick.is_open())
+
 func inspect_photo(id: String) -> void:
-	if phase != "photos" or transitioning: return
+	if not photos_available(): return
 	photo_comparison = id
 	player.set_locked(true)
 	hud.show_line("", "", null, [])
@@ -327,7 +330,7 @@ func inspect_photo(id: String) -> void:
 # Optional: lifts the glass over the torn photo, then opens the reassembly board.
 func start_photo_puzzle() -> void:
 	var id := photo_comparison
-	if id.is_empty() or phase != "photos" or not photo_puzzle.walls.has(id) or photo_puzzle.active != "": return
+	if id.is_empty() or not photos_available() or not photo_puzzle.walls.has(id): return
 	photo_comparison = ""
 	hud.close_dialog()
 	hud.touch.hide()
@@ -336,7 +339,9 @@ func start_photo_puzzle() -> void:
 	photo_puzzle.remove_glass(id)
 	var token := int(session)
 	await get_tree().create_timer(.65).timeout
-	if token != int(session) or phase != "photos": return
+	if token != int(session) or phase not in CLINIC_PHASES: return
+	if not sequence_id.is_empty() or hud.menu.visible or transitioning:
+		return # A dialogue took over meanwhile: the board never opens over it.
 	photo_puzzle.open(id)
 
 func start_lockpick(id: String, pins: int) -> void:
@@ -363,8 +368,9 @@ func on_lockpick_closed(id: String, solved: bool) -> void:
 			full_game.open_roof_door()
 
 func on_puzzle_closed(id: String, solved: bool) -> void:
-	if phase == "photos": player.set_locked(false)
-	hud.close_dialog()
+	if sequence_id.is_empty():
+		hud.close_dialog()
+		if phase in CLINIC_PHASES and not transitioning: player.set_locked(hud.menu.visible)
 	save_game()
 
 func check_walk_progress() -> void:
@@ -397,10 +403,6 @@ func check_walk_progress() -> void:
 		if p.z > layout.CLINIC_START+.4:
 			phase = "photos"
 			update_staging()
-			if not flags.get("corridor_scare", false):
-				flags["corridor_scare"] = true
-				show_lili_glimpse()
-				sound("lili_glimpse")
 			save_game()
 
 func is_inside_location(p: Vector3) -> bool:
@@ -449,6 +451,10 @@ func start_dialogue(id: String) -> void:
 		enter_photo_inspection()
 		return
 	scene_timer.stop()
+	# A dialogue always wins over the photo overlays: they never share the screen.
+	photo_comparison = ""
+	if is_instance_valid(photo_puzzle) and photo_puzzle.active != "": photo_puzzle.close(false)
+	hud.photo_pair.hide()
 	sequence_id = id
 	node_id = database.get_sequence(id)["start"]
 	dialogue_portrait = ""
@@ -807,9 +813,9 @@ func run_event(event: String) -> void:
 			actor_tween.tween_callback(func():
 				lili.hide()
 				play_clip(lili, "idle"))
-			var nameplate: MeshInstance3D = model.find_child("Trunk name", true, false)
-			if nameplate:
-				frame_player_at(nameplate.to_global(nameplate.get_aabb().get_center()), .5)
+			var painted: Label3D = full_game.set_dressing.trunk_name_ru
+			if is_instance_valid(painted):
+				frame_player_at(painted.global_position, .5)
 		"hairpin_received":
 			flags["hairpin"] = true
 			sound("hairpin")
@@ -1032,7 +1038,6 @@ func stop_effects() -> void:
 	if is_instance_valid(lockpick) and lockpick.is_open():
 		lockpick.close(false)
 	if is_instance_valid(opening) and opening.playing: opening.stop()
-	if is_instance_valid(screamer): screamer.stop()
 	scene_timer.stop()
 	scene_timer.paused = false
 	mirror_gaze_time = 0
@@ -1212,7 +1217,6 @@ func show_lili_glimpse() -> void:
 	glimpse_tween.tween_interval(.35)
 	glimpse_tween.tween_callback(func():
 		if session != glimpse_session: return
-		screamer.play()
 		shake_camera(.06))
 	glimpse_tween.tween_interval(.75)
 	glimpse_tween.tween_callback(func():

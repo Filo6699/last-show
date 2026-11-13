@@ -267,6 +267,15 @@ func make_roof() -> void:
 			node.set_meta("dynamic_set",true);visible.append(node)
 	tramp_target.set_meta("outline_meshes",visible)
 	asset("rope_coil",t+Vector3(-2,.04,0),.6,.65,false)
+	# A folded note on the boards past the trampoline, under the corner lamp.
+	var note_at:=Vector3(7.15,y+.015,-1.2)
+	var sheet:=box(note_at,Vector3(.21,.006,.28),"e3d9bf");sheet.rotation.y=.35
+	var crease:=box(note_at+Vector3(0,.004,0),Vector3(.21,.002,.006),"b9ad90");crease.rotation.y=.35
+	var scrawl:=sign_text("Точно ли это то,\nчего ты хочешь,\nРичард?",note_at+Vector3(0,.006,0),.16,0,"3a3140")
+	scrawl.rotation=Vector3(-PI/2,.35,0);scrawl.outline_size=0
+	for piece in [sheet,crease]:piece.set_meta("dynamic_set",true)
+	var note_target:=target("roof_note",note_at+Vector3(0,.15,0),Vector3(.6,.35,.6),"Поднять записку")
+	note_target.set_meta("outline_meshes",[sheet])
 
 func is_roof_position(at: Vector3) -> bool:
 	if at.y < ROOF_FLOOR - 1 or at.y > ROOF_FLOOR + 5: return false
@@ -304,13 +313,25 @@ func make_home() -> void:
 	box(c+Vector3(0,2.65,-4),Vector3(1.4,.7,.15),"a7aaa0",true)
 	room_shell(c+Vector3(0,0,-7.5),5,7,"8c9690",0,true)
 	for i in 15:box(c+Vector3(-3.7+i*.52,.012,0),Vector3(.015,.008,7.8),"514d42")
-	asset("victorian_bed",c+Vector3(-2.4,0,.3),0,1,true)
-	asset("wardrobe",c+Vector3(2.6,0,2.4),PI,1,true)
-	table(c+Vector3(-2.4,0,-2.6),1.1,.65)
-	cylinder(c+Vector3(-2.4,1.16,-2.6),.20,.4,"c7b791")
+	# Furniture stands against the walls and in the corners; the middle of the
+	# room, the x=0 line and the north doorway stay open for the walk to the mirror.
+	asset("victorian_bed",c+Vector3(-3.16,0,2.8),0,1,true)
+	asset("wardrobe",c+Vector3(3.08,0,3.52),PI,1,true)
+	table(c+Vector3(-2.6,0,-3.55),1.1,.65)
+	cylinder(c+Vector3(-2.6,1.16,-3.55),.20,.4,"c7b791")
 	var shade:=CylinderMesh.new();shade.bottom_radius=.32;shade.top_radius=.21;shade.height=.34
-	mesh_node(shade,c+Vector3(-2.4,1.5,-2.6),material("dbc28e",0,.8,.5))
-	point_light(c+Vector3(-2.4,1.45,-2.4),"e9c486",.9,5)
+	mesh_node(shade,c+Vector3(-2.6,1.5,-3.55),material("dbc28e",0,.8,.5))
+	point_light(c+Vector3(-2.6,1.45,-3.3),"e9c486",.9,5)
+	# Bedside table in the gap between the bed and the shelves, on the west wall.
+	table(c+Vector3(-3.6,0,1.25),.5,.5)
+	# Shelving unit along the west wall: two side panels, shelves, books and boxes.
+	for z in [-2.35,-.35]:box(c+Vector3(-3.76,1.0,z),Vector3(.3,2.0,.05),"4b3b2d",true,0.0,"SetPanel","wood")
+	for h in [.05,.55,1.05,1.55,2.0]:box(c+Vector3(-3.76,h,-1.35),Vector3(.3,.04,2.05),"5b4633",h==.05,0.0,"SetPanel","wood")
+	box(c+Vector3(-3.92,1.0,-1.35),Vector3(.02,2.0,2.0),"3b2f25")
+	for i in 7:box(c+Vector3(-3.76,.78,-2.2+i*.12),Vector3(.2,.38-(i%3)*.04,.08),["7a3b3b","3d5a52","8f7a47"][i%3])
+	for i in 4:box(c+Vector3(-3.76,1.28,-1.0+i*.3),Vector3(.2,.4,.12+(i%2)*.1),["a68e5a","6f7f8a"][i%2])
+	box(c+Vector3(-3.76,1.74,-.8),Vector3(.24,.3,.4),"8c7a58")
+	box(c+Vector3(-3.76,.3,-1.55),Vector3(.24,.4,.5),"6d5a40")
 	box(c+Vector3(.3,.02,.5),Vector3(3.1,.025,2.7),"5e776e")
 	# Window frame, curtains, daylight card and a narrow sill.
 	box(c+Vector3(3.90,1.85,-.6),Vector3(.025,1.7,2.3),"849fa2")
@@ -330,9 +351,9 @@ func make_home() -> void:
 		poster.mesh_node(picture,Vector3(0,.02,.015),ink)
 		poster.sign_text(["МОРДЕКАЙ","БРУНО","ЭЛЬЗА"][i],Vector3(0,.51,.015),.7,0,"4d3035")
 		poster.sign_text("LAST SHOW",Vector3(0,-.52,.015),.68,0,"563a3c")
-	table(c+Vector3(1.8,0,-2.6),1.6,.6)
+	table(c+Vector3(2.6,0,-3.55),1.6,.6)
 	var toy:Node3D=load("res://assets/characters/models/mordecai.glb").instantiate()
-	toy.position=c+Vector3(1.8,.91,-2.6);toy.scale=Vector3.ONE*.15;add_child(toy)
+	toy.position=c+Vector3(2.6,.91,-3.55);toy.scale=Vector3.ONE*.15;add_child(toy)
 	for animator in toy.find_children("*","AnimationPlayer",true,false):animator.stop()
 	for mesh in toy.find_children("*","MeshInstance3D",true,false):mesh.layers=1
 	# Physical bathroom fixtures and a live mirror.

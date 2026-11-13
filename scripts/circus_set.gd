@@ -12,10 +12,23 @@ var trunk_name_ru:Label3D
 var trunk_lid:Node3D
 var trunk_lid_tween:Tween
 var trunk_open:=false
-var knife_rest_y:=0.0
+# Television in the dressing room: static, then a short broadcast.
+const TV_STATIC_END:=1.3
+const TV_CARD_END:=3.9
+const TV_TOTAL:=4.4
+var tv_origin:Vector3
+var tv_idle_text:Label3D
+var tv_static:MeshInstance3D
+var tv_card:Node3D
+var tv_light:OmniLight3D
+var tv_noise:Image
+var tv_noise_texture:ImageTexture
+var tv_clock:=-1.0
+var tv_next_noise:=0.0
 
 func setup(owner_game) -> void:
 	game=owner_game;name="CircusSetDressing"
+	shrink_trunk()
 	make_grain();dress_floor();dress_canvas();arena();large_sets();dressing();service();clinic();outside()
 	russian_trunk_name()
 	open_trunk_mesh()
@@ -27,11 +40,33 @@ func setup(owner_game) -> void:
 	add_child(workrooms);workrooms.setup(game)
 	batch()
 
+# The supplied trunk stands 1.5 m tall and 2.1 m across: a crate, not a
+# magician's trunk. Shrink it, mesh and collision alike, about its floor
+# centre, so it still rests on the ring where the artist put it.
+const TRUNK_SCALE := .75
+func shrink_trunk() -> void:
+	var trunk:=game.model.find_child("StoryTrunk",true,false) as MeshInstance3D
+	if trunk==null:return
+	var bounds:AABB=trunk.global_transform*trunk.get_aabb()
+	var pivot:=Vector3(trunk.global_position.x,bounds.position.y,trunk.global_position.z)
+	var shrink:=Transform3D(Basis.IDENTITY.scaled(Vector3.ONE*TRUNK_SCALE),pivot-pivot*TRUNK_SCALE)
+	trunk.global_transform=shrink*trunk.global_transform
+	for body in game.model.get_node("GeometryCollisions").get_children():
+		if String(body.get_meta("source_mesh","")) not in ["StoryTrunk","Trunk name"]:continue
+		for child in body.get_children():
+			var shape:=child as CollisionShape3D
+			if shape==null or not shape.shape is ConcavePolygonShape3D:continue
+			var to_world:Transform3D=shape.global_transform
+			var faces:=PackedVector3Array()
+			for v in (shape.shape as ConcavePolygonShape3D).get_faces():faces.append(to_world.affine_inverse()*(shrink*(to_world*v)))
+			var scaled:=ConcavePolygonShape3D.new();scaled.set_faces(faces);shape.shape=scaled
+
 # Lili hides inside the trunk, so it needs a real opening. Cut the top cap off
 # the supplied mesh, line the inside, and hinge a separate lid on the far side
 # (away from the player's approach) that swings open when she jumps out.
 const TRUNK_RIM := .48
 const TRUNK_OPEN_ANGLE := -1.95
+const TRUNK_TRAY := .44
 func open_trunk_mesh() -> void:
 	var trunk:=game.model.find_child("StoryTrunk",true,false) as MeshInstance3D
 	if trunk==null:return
@@ -74,7 +109,7 @@ func open_trunk_mesh() -> void:
 	var tray:=SurfaceTool.new();tray.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for i in rim.size():
 		var a:Vector2=rim[i]*.93;var b:Vector2=rim[(i+1)%rim.size()]*.93
-		tray.add_vertex(Vector3(0,.44,0));tray.add_vertex(Vector3(b.x,.44,b.y));tray.add_vertex(Vector3(a.x,.44,a.y))
+		tray.add_vertex(Vector3(0,TRUNK_TRAY,0));tray.add_vertex(Vector3(b.x,TRUNK_TRAY,b.y));tray.add_vertex(Vector3(a.x,TRUNK_TRAY,a.y))
 	tray.generate_normals()
 	var tray_mesh:=MeshInstance3D.new();tray_mesh.name="TrunkTray";tray_mesh.mesh=tray.commit()
 	var tray_material:=StandardMaterial3D.new();tray_material.albedo_color=Color("3a1f22");tray_material.roughness=.9;tray_material.cull_mode=BaseMaterial3D.CULL_DISABLED
@@ -96,7 +131,12 @@ func open_trunk_mesh() -> void:
 	slab.generate_normals()
 	var lid_mesh:=MeshInstance3D.new();lid_mesh.name="LidSlab";lid_mesh.mesh=slab.commit();lid_mesh.material_override=finish
 	trunk_lid.add_child(lid_mesh);lid_mesh.set_meta("dynamic_set",true);trunk_lid.set_meta("dynamic_set",true)
-	knife_rest_y=0.0
+	# The name is painted inside the lid, like a magician's trunk: it shows
+	# once the lid stands open, upright, facing whoever looks into the trunk.
+	if is_instance_valid(trunk_name_ru):
+		trunk_name_ru.reparent(trunk_lid,false)
+		trunk_name_ru.transform=Transform3D(Basis(Vector3(0,0,1),Vector3(-1,0,0),Vector3(0,-1,0)),Vector3(-hinge_x,-.004,0))
+		trunk_name_ru.double_sided=false
 
 func set_trunk_open(value:bool,animate:=false) -> void:
 	if trunk_lid==null:return
@@ -107,11 +147,6 @@ func set_trunk_open(value:bool,animate:=false) -> void:
 		trunk_lid_tween=create_tween()
 		trunk_lid_tween.tween_property(trunk_lid,"rotation:z",angle,.28).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	else:trunk_lid.rotation.z=angle
-	# Closed: the knife lies on the lid. Open: on the tray inside the rim.
-	var drop:=-.09 if value else 0.0
-	# The pickup box stays where it was: the trunk's collision keeps its top,
-	# and a box sunk below it would be unreachable.
-	if is_instance_valid(knife):knife.position.y=drop
 
 # The supplied trunk lid spells the name in Latin letters as an extruded mesh.
 # Keep that node (story code shows it and frames the camera on it) but stop
@@ -267,18 +302,27 @@ func arena() -> void:
 		lamp.material_override=material("f5cc8d",0,.6,1.1)
 		hang_cable.call_deferred(at+Vector3(0,2.2,0))
 		point_light(at+Vector3(0,1.5,0),"c7b088",.38,10)
-	# A small visible knife rests on the original trunk; the trunk itself stays put.
+	# The knife stands stuck point-down in the trunk's tray beside the painted
+	# name the camera frames when Lili runs off, clear of the letters. Grip and
+	# guard rise above the rim, flat side to the player's approach, under a
+	# small spot.
 	knife=Node3D.new();knife.name="StoryKnife";knife.set_meta("dynamic_set",true);add_child(knife)
 	var trunk:MeshInstance3D=game.model.find_child("StoryTrunk",true,false)
-	var bounds:AABB=trunk.global_transform*trunk.get_aabb()
-	var height:float=bounds.end.y+.027
 	# Colours follow the artist's item drawing: black grip, steel guard and pommel.
-	var handle:=box(Vector3(.38,height,.25),Vector3(.06,.045,.24),"1e1d22")
-	var blade:=box(Vector3(.38,height,.03),Vector3(.06,.02,.21),"aeb2bc",false,.8)
-	var guard:=box(Vector3(.38,height+.004,.132),Vector3(.12,.035,.024),"8e9099",false,.8)
-	var pommel:=box(Vector3(.38,height+.002,.378),Vector3(.085,.03,.018),"8e9099",false,.8)
-	for part in [handle,blade,guard,pommel]:part.reparent(knife,true)
-	var pickup:=target("knife",Vector3(.38,height+.04,.14),Vector3(.3,.13,.5),"Взять нож")
+	# Built along local +Z (pommel end); the guard sits at the origin.
+	var handle:=box(Vector3(0,0,.11),Vector3(.06,.045,.24),"1e1d22")
+	var blade:=box(Vector3(0,0,-.11),Vector3(.065,.02,.22),"c4c8d2",false,.85)
+	var guard:=box(Vector3(0,0,-.008),Vector3(.13,.035,.024),"8e9099",false,.8)
+	var pommel:=box(Vector3(0,0,.238),Vector3(.085,.045,.018),"8e9099",false,.8)
+	for part in [handle,blade,guard,pommel]:part.reparent(knife,false)
+	var tray:Vector3=trunk.to_global(Vector3(.12,TRUNK_TRAY,.32))
+	var upright:=Basis(Vector3.UP,-PI/4)*Basis(Vector3.RIGHT,-PI/2+.2)
+	knife.global_transform=Transform3D(upright.scaled_local(Vector3.ONE*1.2),tray+Vector3(0,.15,0))
+	var glint:=SpotLight3D.new();glint.name="KnifeGlint";glint.light_color=Color("f2e6cf");glint.light_energy=4.0
+	glint.spot_range=2.0;glint.spot_angle=14;glint.spot_attenuation=.5;glint.shadow_enabled=false
+	knife.add_child(glint);glint.global_position=tray+Vector3(-.5,1.1,.5);glint.look_at(tray+Vector3(0,.2,0),Vector3.UP)
+	# The pickup box wraps the grip and guard above the rim.
+	var pickup:=target("knife",tray+Vector3(-.02,.27,.02),Vector3(.24,.36,.24),"Взять нож")
 	pickup.set_meta("outline_meshes",[handle,blade,guard,pommel]);knife.set_meta("target",pickup)
 
 func training_rack() -> void:
@@ -313,18 +357,20 @@ func dressing() -> void:
 	var television_start:=get_child_count()
 	table(at,1.6,.75)
 	box(at+Vector3(0,1.3,0),Vector3(1.28,.78,.58),"573e31",true)
-	box(at+Vector3(-.12,1.33,.31),Vector3(.86,.57,.025),"182a29")
+	tv_origin=at+Vector3(-.12,1.33,.31)
+	box(tv_origin,Vector3(.86,.57,.025),"182a29")
 	for y in range(6):box(at+Vector3(.48,1.13+y*.065,.31),Vector3(.12,.018,.015),"827456")
 	for y in [1.16,1.48]:
 		var dial:=cylinder(at+Vector3(.48,y,.34),.055,.025,"2a2b29",.3);dial.rotation.x=PI/2
 	rod(at+Vector3(-.12,1.72,0),at+Vector3(-.52,2.25,0),.012,"929b91",.7)
 	rod(at+Vector3(.12,1.72,0),at+Vector3(.55,2.15,0),.012,"929b91",.7)
-	sign_text("ЭФИР ОКОНЧЕН",at+Vector3(-.12,1.33,.33),.31,0,"638d7c")
+	tv_idle_text=sign_text("ЭФИР ОКОНЧЕН",at+Vector3(-.12,1.33,.33),.31,0,"638d7c")
 	var television:=target("television",at+Vector3(0,1.3,.4),Vector3(1.1,.65,.16),"Посмотреть телевизор")
 	var tv_meshes:Array[MeshInstance3D]=[]
 	for node in get_children().slice(television_start):
 		if node is MeshInstance3D:node.set_meta("dynamic_set",true);tv_meshes.append(node)
 	television.set_meta("outline_meshes",tv_meshes)
+	build_television_screen()
 	# The supplied teal door mat at the passage mouth sits under the end of the
 	# passage runner, a second rug overlapping the first right in the doorway.
 	# The runner already marks the way in; drop the mat and its 2 cm collider.
@@ -332,6 +378,19 @@ func dressing() -> void:
 	if door_mat:door_mat.hide()
 	for body in game.model.get_node("GeometryCollisions").get_children():
 		if String(body.get_meta("source_mesh",""))=="Plane_008":body.collision_layer=0
+	# The supplied costume stand carries about 100k vertices (tester: 20 fps next to
+	# it on a phone). Hide it with its eight garments and drop every collider.
+	var costume_stand:=game.model.find_child("Dressing Stand",true,false) as Node3D
+	if costume_stand:
+		costume_stand.hide()
+		for part in costume_stand.find_children("*","MeshInstance3D",true,false):part.hide()
+	for body in game.model.get_node("GeometryCollisions").get_children():
+		var source:=String(body.get_meta("source_mesh",""))
+		if source=="Dressing Stand" or source.begins_with("Mesh_0"):body.collision_layer=0
+	# The candle stubs on both vanity tables are a heavy surface of their own.
+	for table_name in ["vanity_table","vanity_table_002"]:
+		var vanity:=game.model.find_child(table_name,true,false) as MeshInstance3D
+		if vanity:strip_candles(vanity)
 	# The tent's three lantern mounts were authored for a lower ceiling and hung
 	# 2-4 m under the canvas, one of them over the bed. Run each up on a cable.
 	for lantern in game.model.find_children("Lamp ceiling mount*","MeshInstance3D",true,false):
@@ -348,6 +407,68 @@ func dressing() -> void:
 	for i in 3:
 		plaque(["НОВЫЙ СЕЗОН","АРТИСТЫ ЦИРКА","СЕГОДНЯ АНШЛАГ"][i],Vector3(-54.5+i*1.1,2.4,33.9),.9,1.1,.2)
 	point_light(Vector3(-53,3.5,36),"e1b98b",.7,7)
+
+func build_television_screen() -> void:
+	tv_noise=Image.create(40,26,false,Image.FORMAT_L8)
+	tv_noise_texture=ImageTexture.create_from_image(tv_noise)
+	var screen_size:=Vector2(.84,.55)
+	var quad:=QuadMesh.new();quad.size=screen_size
+	var noise_material:=StandardMaterial3D.new()
+	noise_material.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
+	noise_material.albedo_texture=tv_noise_texture;noise_material.texture_filter=BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	tv_static=mesh_node(quad,tv_origin+Vector3(0,0,.018),noise_material,"TvStatic")
+	tv_static.set_meta("dynamic_set",true);tv_static.visible=false
+	tv_card=Node3D.new();tv_card.name="TvCard";tv_card.visible=false;add_child(tv_card)
+	var card_material:=StandardMaterial3D.new();card_material.albedo_color=Color("16202e")
+	card_material.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
+	var red_material:=StandardMaterial3D.new();red_material.albedo_color=Color("b3262d")
+	red_material.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
+	var back:=MeshInstance3D.new();back.mesh=quad;back.material_override=card_material
+	back.position=tv_origin+Vector3(0,0,.022);tv_card.add_child(back)
+	var band_mesh:=QuadMesh.new();band_mesh.size=Vector2(.84,.11)
+	var band:=MeshInstance3D.new();band.mesh=band_mesh;band.material_override=red_material
+	band.position=tv_origin+Vector3(0,.22,.024);tv_card.add_child(band)
+	for line in [["СРОЧНО",.62,Vector3(0,.22,.03),"f4f0e6"],["ПРОПАЛ\nПАЦИЕНТ",.78,Vector3(0,.0,.03),"f4f0e6"],["ВИДЕЛИ ЕГО?",.74,Vector3(0,-.21,.03),"f0cf6a"]]:
+		var label:=sign_text(line[0],tv_origin+line[2],line[1],0,line[3])
+		label.shaded=false;label.outline_size=0
+		label.reparent(tv_card,false);label.position=tv_origin+line[2]
+	tv_light=point_light(tv_origin+Vector3(0,0,.9),"9fc2ff",0.0,3.5)
+
+func play_television() -> void:
+	tv_clock=0.0;tv_next_noise=0.0
+	if tv_idle_text:tv_idle_text.visible=false
+	tv_light.light_energy=.6
+
+func _process(delta:float) -> void:
+	if tv_clock<0.0:return
+	tv_clock+=delta
+	if tv_clock>=TV_TOTAL:
+		tv_clock=-1.0;tv_static.visible=false;tv_card.visible=false;tv_light.light_energy=0.0
+		if tv_idle_text:tv_idle_text.visible=true
+		return
+	# The picture stutters on: a short black gap, then snow, then the card.
+	var in_card:=tv_clock>=TV_STATIC_END and tv_clock<TV_CARD_END
+	var gap:=tv_clock<.12 or (tv_clock>.26 and tv_clock<.34) or (in_card and tv_clock<TV_STATIC_END+.12)
+	tv_card.visible=in_card and not gap
+	tv_static.visible=not in_card and not gap
+	tv_light.light_energy=0.0 if gap else (.5+randf()*.3 if not in_card else .35)
+	if tv_static.visible and tv_clock>=tv_next_noise:
+		tv_next_noise=tv_clock+.05
+		for y in tv_noise.get_height():
+			for x in tv_noise.get_width():tv_noise.set_pixel(x,y,Color.from_hsv(0,0,randf()*.85+.1))
+		tv_noise_texture.update(tv_noise)
+
+func strip_candles(vanity:MeshInstance3D) -> void:
+	var source:=vanity.mesh as ArrayMesh
+	if source==null:return
+	var stripped:=ArrayMesh.new()
+	for surface in source.get_surface_count():
+		var material:=source.surface_get_material(surface)
+		var label:=material.resource_name if material else ""
+		if label.begins_with("Dirty_candle_wax") or label.begins_with("Soot_black"):continue
+		stripped.add_surface_from_arrays(source.surface_get_primitive_type(surface),source.surface_get_arrays(surface))
+		stripped.surface_set_material(stripped.get_surface_count()-1,material)
+	vanity.mesh=stripped
 
 func service() -> void:
 	var x:float=game.layout.SERVICE_X;var z:float=game.layout.SERVICE_START

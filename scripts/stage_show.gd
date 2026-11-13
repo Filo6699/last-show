@@ -9,7 +9,7 @@ var applause := 0.0
 var cane: MeshInstance3D
 var loose_canvas: MeshInstance3D
 var animations: Array[Tween]=[]
-var debris_nodes: Array[MeshInstance3D]=[]
+var debris_nodes: Array[Node3D]=[]
 var view_tween: Tween
 var view_active := false
 var neutral_pitch := 0.0
@@ -89,8 +89,9 @@ func start_applause() -> void:
 
 func roof_crack():
 	game.flags["roof_damaged"]=true
-	# Leave a clear margin before the 2.2s scene auto-advance.
-	camera_aim_at(ROOF_LOOK_TARGET,.9)
+	# A still shot on the hole for the whole beat; the view returns just
+	# before the 4s scene auto-advance.
+	camera_aim_at(ROOF_LOOK_TARGET,2.9)
 	var tween:=create_tween();animations.append(tween)
 	loose_canvas.show()
 	tween.tween_property(loose_canvas,"rotation:x",1.05,.6).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
@@ -102,6 +103,20 @@ func roof_crack():
 		fall.tween_property(debris,"position:y",.09,1.5+i*.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 		fall.tween_property(debris,"rotation",Vector3(i+2,1,i),1.2)
 		fall.chain().tween_interval(3);fall.tween_callback(debris.queue_free)
+	tear_effects()
+## Readable tear: ragged strips of canvas drop and flutter from the edge of the hole.
+func tear_effects() -> void:
+	var cloth:=material("8a3440");cloth.cull_mode=BaseMaterial3D.CULL_DISABLED
+	for i in 7:
+		var strip:=MeshInstance3D.new();var quad:=QuadMesh.new();quad.size=Vector2(.28+(i%3)*.12,.9+(i%4)*.25);strip.mesh=quad
+		strip.material_override=cloth;strip.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		strip.position=ROOF_BREACH_CENTER+Vector3(-1.6+i*.55,-.2,-.9+(i%3)*.9);add_child(strip);debris_nodes.append(strip)
+		var drift:=create_tween().set_parallel(true);animations.append(drift)
+		var delay:=i*.12
+		drift.tween_property(strip,"position:y",strip.position.y-18.0-i,3.2+i*.15).set_delay(delay).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+		drift.tween_property(strip,"position:x",strip.position.x+(1.4 if i%2==0 else -1.4),3.2).set_delay(delay).set_trans(Tween.TRANS_SINE)
+		drift.tween_property(strip,"rotation",Vector3(2.2+i*.3,1.5-i*.4,3.0),3.2).set_delay(delay)
+		drift.chain().tween_callback(strip.queue_free)
 func camera_gesture(offset: float, hold: float) -> void:
 	if view_tween and view_tween.is_valid(): view_tween.kill()
 	if view_active: game.player.camera.rotation.x=neutral_pitch
