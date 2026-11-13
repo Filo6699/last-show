@@ -25,6 +25,11 @@ func _build_after_world_setup() -> void:
 	if not is_instance_valid(game) or not is_instance_valid(stage_show):
 		return
 	late = game.full_game.late
+	_move_breach_over_trampoline()
+	await get_tree().physics_frame
+	if not is_instance_valid(game):
+		return
+	_patch_canopy_slot()
 	_build_irregular_cut_edge()
 	_build_catwalk_joints()
 	_replace_legacy_flap()
@@ -68,6 +73,249 @@ func _replace_legacy_flap() -> void:
 	folded_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	flap.material_override = folded_material
 	flap.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
+# The supplied canopy came cut near the king pole, over the west catwalk. The
+# story needs one opening, straight above the trampoline on the east deck, so
+# Richard bounces up through it. Close the old cut with the mirror image of the
+# intact canvas across x=0 (the canopy is mirror-symmetric there; mirroring
+# swaps which material each stripe uses), then cut the new opening.
+const OLD_BREACH_X := Vector2(-11.4, -4.5)
+const OLD_BREACH_Z := Vector2(-9.4, -2.5)
+
+func _move_breach_over_trampoline() -> void:
+	var source: MeshInstance3D = game.model.find_child("Шатер - главный_001", true, false)
+	if not is_instance_valid(source) or source.mesh == null or source.mesh.get_surface_count() != 2:
+		return
+	var new_x: Vector2 = stage_show.ROOF_BREACH_X_RANGE
+	var new_z: Vector2 = stage_show.ROOF_BREACH_Z_RANGE
+	var to_world := source.global_transform
+	var to_local := to_world.affine_inverse()
+	var empty := {}
+	var surfaces: Array = []
+	for index in 2:
+		surfaces.append(source.mesh.surface_get_arrays(index))
+	var built: Array = [[], []]
+	var cut_pieces: Array = [[], []]
+	for index in 2:
+		var arrays: Array = surfaces[index]
+		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+		for t in range(0, indices.size(), 3):
+			var corners: Array[Vector3] = []
+			for k in 3: corners.append(to_world * vertices[indices[t + k]])
+			var centre: Vector3 = (corners[0] + corners[1] + corners[2]) / 3.0
+			# Keep the triangle unless it reaches the new opening; those are
+			# split finely and only the pieces outside the opening survive.
+			var cut := Rect2(new_x.x, new_z.x, new_x.y - new_x.x, new_z.y - new_z.x)
+			if centre.y > 44.0 and _triangle_touches(corners, cut.grow(.05)):
+				for piece in _split_outside(corners, cut, .25):
+					cut_pieces[index].append(piece)
+			else:
+				built[index].append([indices[t], indices[t + 1], indices[t + 2], false])
+			# Mirror it into the old cut where that cut has no canvas.
+			var covers := false
+			var samples: Array[Vector3] = [centre]
+			for a in 9:
+				for b in 9 - a:
+					samples.append(corners[0] + (corners[1] - corners[0]) * (a / 8.0) + (corners[2] - corners[0]) * (b / 8.0))
+			for sample in samples:
+				var mirrored := Vector3(-sample.x, sample.y, sample.z)
+				if mirrored.y < 44.0 or mirrored.x < OLD_BREACH_X.x or mirrored.x > OLD_BREACH_X.y or mirrored.z < OLD_BREACH_Z.x or mirrored.z > OLD_BREACH_Z.y:
+					continue
+				var key := Vector2i(roundi(mirrored.x * 4.0), roundi(mirrored.z * 4.0))
+				if not empty.has(key): empty[key] = _surface_at(mirrored.x, mirrored.z).is_empty()
+				if empty[key]:
+					covers = true
+					break
+			if covers:
+				built[1 - index].append([indices[t], indices[t + 1], indices[t + 2], true, index])
+	var mesh := ArrayMesh.new()
+	var faces := PackedVector3Array()
+	for index in 2:
+		var own: Array = surfaces[index]
+		var out_v := PackedVector3Array()
+		var out_n := PackedVector3Array()
+		var out_uv := PackedVector2Array()
+		for triangle in built[index]:
+			var from: Array = surfaces[triangle[4]] if triangle[3] else own
+			var order := [0, 2, 1] if triangle[3] else [0, 1, 2]
+			for k in order:
+				var vertex: Vector3 = from[Mesh.ARRAY_VERTEX][triangle[k]]
+				var normal: Vector3 = from[Mesh.ARRAY_NORMAL][triangle[k]]
+				if triangle[3]:
+					# A few centimetres outside, so the original canvas wins
+					# wherever the copy overlaps it.
+					var world := to_world * vertex
+					vertex = to_local * Vector3(-world.x, world.y + .03, world.z)
+					var world_normal := to_world.basis * normal
+					normal = (to_local.basis * Vector3(-world_normal.x, world_normal.y, world_normal.z)).normalized()
+				out_v.append(vertex)
+				out_n.append(normal)
+				out_uv.append(from[Mesh.ARRAY_TEX_UV][triangle[k]])
+				faces.append(to_world * vertex)
+		var flat_normal: Vector3 = own[Mesh.ARRAY_NORMAL][0]
+		for piece in cut_pieces[index]:
+			var normal: Vector3 = (to_local.basis * (piece[1] - piece[0]).cross(piece[2] - piece[0])).normalized()
+			for point in piece:
+				out_v.append(to_local * point)
+				out_n.append(normal if normal.length_squared() > .5 else flat_normal)
+				out_uv.append(Vector2(0, 1))
+				faces.append(point)
+		var arrays: Array = []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = out_v
+		arrays[Mesh.ARRAY_NORMAL] = out_n
+		arrays[Mesh.ARRAY_TEX_UV] = out_uv
+		# Other code reads the canopy as an indexed mesh.
+		var sequence := PackedInt32Array()
+		for i in out_v.size(): sequence.append(i)
+		arrays[Mesh.ARRAY_INDEX] = sequence
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var materials := [source.get_active_material(0), source.get_active_material(1)]
+	source.mesh = mesh
+	for index in 2: source.set_surface_override_material(index, materials[index])
+	for body in game.model.find_children("*", "StaticBody3D", true, false):
+		if String(body.get_meta("source_mesh", "")) != String(source.name): continue
+		var shape := body.get_child(0) as CollisionShape3D
+		if shape == null or not shape.shape is ConcavePolygonShape3D: continue
+		var local_faces := PackedVector3Array()
+		var inverse: Transform3D = shape.global_transform.affine_inverse()
+		for point in faces: local_faces.append(inverse * point)
+		shape.shape.set_faces(local_faces)
+	# The canvas occluder was built from the old triangles; it would now hide
+	# the sky through the new opening.
+	for occluder in source.find_children("*", "OccluderInstance3D", false, false):
+		var occlusion := ArrayOccluder3D.new()
+		var points := PackedVector3Array()
+		for point in faces: points.append(to_local * point)
+		var order := PackedInt32Array()
+		for i in points.size(): order.append(i)
+		occlusion.set_arrays(points, order)
+		occluder.occluder = occlusion
+
+
+func _triangle_touches(corners: Array[Vector3], rect: Rect2) -> bool:
+	var low := Vector2(minf(corners[0].x, minf(corners[1].x, corners[2].x)), minf(corners[0].z, minf(corners[1].z, corners[2].z)))
+	var high := Vector2(maxf(corners[0].x, maxf(corners[1].x, corners[2].x)), maxf(corners[0].z, maxf(corners[1].z, corners[2].z)))
+	return rect.intersects(Rect2(low, high - low))
+
+
+# Halve the triangle's longest edge until the pieces are small, then drop the
+# ones whose centre lies inside the opening.
+func _split_outside(corners: Array[Vector3], rect: Rect2, size: float) -> Array:
+	var result: Array = []
+	var stack: Array = [corners]
+	while not stack.is_empty():
+		var tri: Array = stack.pop_back()
+		var centre: Vector3 = (tri[0] + tri[1] + tri[2]) / 3.0
+		if not _triangle_touches_array(tri, rect.grow(.05)):
+			result.append(tri)
+			continue
+		var longest := 0
+		var length := 0.0
+		for k in 3:
+			var edge: float = Vector2(tri[k].x - tri[(k + 1) % 3].x, tri[k].z - tri[(k + 1) % 3].z).length()
+			if edge > length: length = edge; longest = k
+		if length <= size:
+			if not rect.has_point(Vector2(centre.x, centre.z)): result.append(tri)
+			continue
+		var a: Vector3 = tri[longest]
+		var b: Vector3 = tri[(longest + 1) % 3]
+		var c: Vector3 = tri[(longest + 2) % 3]
+		var middle: Vector3 = (a + b) * .5
+		stack.append([a, middle, c])
+		stack.append([middle, b, c])
+	return result
+
+
+func _triangle_touches_array(tri: Array, rect: Rect2) -> bool:
+	var typed: Array[Vector3] = [tri[0], tri[1], tri[2]]
+	return _triangle_touches(typed, rect)
+
+
+# The supplied canopy has a second, unintended gap: a long slot over the arena
+# on the +Z side, running out from the king pole. Only the breach is meant to
+# be open. Rebuild the canvas there: the canopy is mirror-symmetric across x=0,
+# so across the slot its height follows h = A - B*x^2, fitted per row from the
+# intact canvas either side. The stripes are radial from the pole and alternate
+# between the two canvas materials; each cell copies the stripe found half a
+# turn round the pole, where the canvas is intact.
+const CANOPY_APEX := Vector3(0, 0, -10)
+const SLOT_HALF_WIDTH := 4.8
+const SLOT_Z := Vector2(0.0, 13.6)
+
+func _patch_canopy_slot() -> void:
+	var empty := {}
+	var rows: Array[float] = []
+	var heights: Array = []
+	var steps_x := 24
+	var z := SLOT_Z.x
+	while z <= SLOT_Z.y + .001:
+		rows.append(z)
+		var near := _surface_at(5.5, z)
+		var far := _surface_at(7.0, z)
+		var row: Array[float] = []
+		for i in steps_x + 1:
+			var x := lerpf(-SLOT_HALF_WIDTH, SLOT_HALF_WIDTH, float(i) / steps_x)
+			var y := 0.0
+			if not near.is_empty() and not far.is_empty():
+				var b: float = (near.position.y - far.position.y) / (49.0 - 30.25)
+				y = near.position.y + b * 30.25 - b * x * x + .03
+			row.append(y)
+			empty[Vector2i(i, rows.size() - 1)] = _surface_at(x, z).is_empty()
+		heights.append(row)
+		z += .4
+	var groups := {}
+	var faces := PackedVector3Array()
+	for r in rows.size() - 1:
+		for i in steps_x:
+			var gap := false
+			for corner in [Vector2i(i, r), Vector2i(i + 1, r), Vector2i(i, r + 1), Vector2i(i + 1, r + 1)]:
+				if empty[corner]: gap = true
+			if not gap: continue
+			var x0 := lerpf(-SLOT_HALF_WIDTH, SLOT_HALF_WIDTH, float(i) / steps_x)
+			var x1 := lerpf(-SLOT_HALF_WIDTH, SLOT_HALF_WIDTH, float(i + 1) / steps_x)
+			var quad: Array[Vector3] = [Vector3(x0, heights[r][i], rows[r]), Vector3(x1, heights[r][i + 1], rows[r]),
+				Vector3(x1, heights[r + 1][i + 1], rows[r + 1]), Vector3(x0, heights[r + 1][i], rows[r + 1])]
+			if quad.any(func(p): return p.y < 1.0): continue
+			var centre: Vector3 = (quad[0] + quad[2]) * .5
+			var opposite := CANOPY_APEX * 2.0 - centre
+			var stripe := _sample_canopy(opposite.x, opposite.z)
+			if stripe.is_empty(): continue
+			var normal: Vector3 = (quad[1] - quad[0]).cross(quad[3] - quad[0]).normalized()
+			if normal.y < 0: normal = -normal
+			var flat_uv: Array[Vector2] = [Vector2(0, 1), Vector2(0, 1), Vector2(0, 1), Vector2(0, 1)]
+			_append_quad(groups, stripe.material, quad, flat_uv, -normal)
+			for k in [0, 1, 2, 0, 2, 3]: faces.append(quad[k])
+	if faces.is_empty(): return
+	var patch := ArrayMesh.new()
+	for key in groups:
+		var data: Dictionary = groups[key]
+		var arrays: Array = []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = data.vertices
+		arrays[Mesh.ARRAY_NORMAL] = data.normals
+		arrays[Mesh.ARRAY_TEX_UV] = data.uvs
+		arrays[Mesh.ARRAY_INDEX] = data.indices
+		patch.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		patch.surface_set_material(patch.get_surface_count() - 1, data.material)
+	var instance := MeshInstance3D.new()
+	instance.name = "CanopySlotPatch"
+	instance.mesh = patch
+	add_child(instance)
+	var body := StaticBody3D.new()
+	body.name = "CanopySlotPatchCollision"
+	body.set_meta("source_mesh", "Шатер - главный_001")
+	var shape := CollisionShape3D.new()
+	var concave := ConcavePolygonShape3D.new()
+	concave.backface_collision = true
+	concave.set_faces(faces)
+	shape.shape = concave
+	body.add_child(shape)
+	add_child(body)
+	body.top_level = true
+	body.global_transform = Transform3D.IDENTITY
 
 
 func _material(color: Color, metallic: float = 0.0) -> StandardMaterial3D:
@@ -270,24 +518,14 @@ func _build_catwalk_joints() -> void:
 	var support_z: float = late.TRAMPOLINE.z
 	var plates := _material(METAL_COLOR, .3)
 	var dark := _material(METAL_DARK, .22)
-	# The three existing ceiling props are now joined by a modest crossbar just
-	# over head height. Small collars and foot plates show how they are fastened.
-	var xs := [-8.0, -1.0, 6.0]
+	# The two posts at the ends of the wire get collars and foot plates. No
+	# crossbar: the wire runs open, and the trampoline needs a clear shot up
+	# through the tear in the canvas.
+	var xs := [-8.0, 7.7]
 	for x in xs:
 		_add_box("CatwalkSupportFoot", Vector3(x, y + .06, support_z), Vector3(.34, .12, .34), plates)
 		_add_box("CatwalkSupportCollar", Vector3(x, y + 2.84, support_z), Vector3(.34, .12, .34), plates)
-		# The imported/generated suspension rod is thin at player-eye distance.
-		# A sleeve makes its connection through the crossbeam visibly continuous.
-		_add_box("CatwalkSuspensionSleeve",Vector3(x,y+2.95,support_z),Vector3(.10,.55,.10),plates)
 		for bolt_x in [-.11, .11]:
 			_add_box("CatwalkFootRivet", Vector3(x + bolt_x, y + .126, support_z), Vector3(.035, .012, .035), dark)
-	for i in 2:
-		var x0: float = xs[i]
-		var x1: float = xs[i + 1]
-		_add_box("CatwalkCrossbeam", Vector3((x0 + x1) * .5, y + 2.78, support_z), Vector3(x1 - x0, .12, .14), dark)
-		for x in [x0, x1]:
-			_add_box("CatwalkBeamBracket", Vector3(x, y + 2.77, support_z), Vector3(.4, .2, .26), plates)
-	# A pair of short diagonal knees beneath the crossbar make the joint legible.
-	for x in [xs[0], xs[2]]:
-		var sign := 1.0 if x == xs[0] else -1.0
-		_add_box("CatwalkKneeBrace", Vector3(x + sign * .35, y + 2.55, support_z), Vector3(.72, .09, .10), dark).rotation.z = sign * -.42
+
+

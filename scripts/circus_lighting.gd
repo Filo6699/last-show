@@ -1,4 +1,5 @@
 extends Node3D
+const SHAFTS:=false
 ## Fixed theatre practicals, cool distance haze and readable pools along the story route.
 ## Compatibility renderer: ordinary fog and a small number of shadowed lights.
 var game
@@ -44,6 +45,15 @@ func setup(owner_game) -> void:
 			hang.call_deferred(data[0]+Vector3(0,.23,0),fitting)
 		else:
 			wire(data[0]+Vector3(0,.23,0),Vector3(data[0].x,3.3 if i==6 else 3.4,data[0].z))
+	# The annex model ships its own small lamps (mount, cable, bracket, glass)
+	# 0-30 cm from the corridor and clinic pendants above, so each spot read as
+	# two fittings jammed together. Keep the pendant, whose bulb holds the light,
+	# and drop the supplied lamp before static batching, colliders included.
+	var annex_lamp:=func(name:String)->bool:return name.begins_with("Lamp ") and name.right(4) in ["_007","_008","_009"]
+	for source in game.model.find_children("Lamp *","MeshInstance3D",true,false):
+		if annex_lamp.call(String(source.name)):source.hide()
+	for collider in game.model.get_node("GeometryCollisions").get_children():
+		if annex_lamp.call(String(collider.get_meta("source_mesh",""))):collider.collision_layer=0
 	# Warm crossed keys pick out the ring instead of lighting the entire tent evenly.
 	spot("RingAmber",Vector3(-9,10,-5),Vector3(1,0,2),"f5dfbf",3.6,38,48,true,true)
 	spot("RingIvory",Vector3(9,11,6),Vector3(-2,0,-1),"ebe3d0",1.8,38,55,false,true)
@@ -103,7 +113,8 @@ func spot(id: String, at: Vector3, target: Vector3, color: String, energy: float
 	light.shadow_opacity=.28 if id=="ClinicTask" else (.65 if id=="TrainingKey" else (.60 if id=="DressingKey" else .90))
 	fixed_spots.append(light)
 	if performance:show_spots.append(light)
-	if id in ["RingAmber","RingIvory"]: add_shaft(light,target)
+	# Haze shafts read the depth texture with depth testing off and flooded the view white on some GPUs.
+	if SHAFTS and id in ["RingAmber","RingIvory"]: add_shaft(light,target)
 	# ClinicTask shares the already visible ceiling pendant; no second floor stand.
 	if not visible_fixture: return
 	# Black can, glowing lens and suspension wire; fixtures do not follow the camera.

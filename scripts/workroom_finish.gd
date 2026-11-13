@@ -188,18 +188,8 @@ func clinic_finish() -> void:
 		var rail_size := Vector3(span, .045, .07)
 		var rail := box(center + normal * .05 + Vector3(0, .53, 0), rail_size, "b19a68", false, .28)
 		rail.rotation.y = yaw
-	# A shallow stainless tray and folded linen complete the existing treatment
-	# table. The three source jars, contract and key remain visible and reachable.
-	var table_center: Vector3 = c + Vector3(-2.6, 0, -.8)
-	var tray_at := table_center + Vector3(.22, .98, .45)
-	box(tray_at, Vector3(.30, .025, .50), "8b9992", false, .7)
-	for side in [-1.0, 1.0]:
-		rod(tray_at + Vector3(-.14, .025, side * .23), tray_at + Vector3(.14, .025, side * .23), .012, "b9c0b5", .8)
-	# Two neat gauze rolls and a folded towel stay grouped at the rear corner.
-	var roll := cylinder(table_center + Vector3(.30, 1.04, -.24), .05, .19, "d9d7c9", .0, 16)
-	roll.rotation.z = PI / 2
-	box(table_center + Vector3(-.31, .96, -.43), Vector3(.28, .055, .24), "b8c7be")
-	box(table_center + Vector3(-.31, .991, -.43), Vector3(.23, .009, .18), "d3d0c3")
+	# The treatment table's tray, bottles, contract and key are laid out in
+	# circus_set.clinic(); nothing more is stacked on it here.
 
 func angular_distance(a: float, b: float) -> float:
 	return absf(wrapf(a - b + PI, -PI, PI))

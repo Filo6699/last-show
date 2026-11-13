@@ -13,6 +13,9 @@ var gesture_wait := 0.0
 var gesture_age := -1.0
 var first_invite_pending := true
 var voice_played := false
+# Set by render culling. Off screen the timers run but the skeleton is left alone.
+var on_screen := true
+var arm_posed := false
 var bone_ids := {}
 var base_poses := {}
 const WAIT_BEFORE_INVITE := 2.5
@@ -63,7 +66,7 @@ func _tick(delta: float) -> void:
 		gesture_age = -1.0
 		first_invite_pending = true
 	elapsed += delta
-	_face_player(delta)
+	if on_screen: _face_player(delta)
 	if gesture_age >= 0.0:
 		gesture_age += delta
 		if gesture_age >= INVITE_LENGTH:
@@ -75,7 +78,7 @@ func _tick(delta: float) -> void:
 			gesture_age = 0.0
 			first_invite_pending = false
 			_play_first_invitation_voice()
-	_apply_invitation()
+	if on_screen: _apply_invitation()
 
 func _play_first_invitation_voice() -> void:
 	if voice_played:
@@ -119,8 +122,12 @@ func _set_bone_delta(bone_name: String, world_axis: Vector3, angle: float) -> vo
 	var local_axis := (rest_basis.inverse() * world_axis).normalized()
 	var base: Quaternion = base_poses[bone_name]
 	skeleton.set_bone_pose_rotation(index, base * Quaternion(local_axis, angle))
+	arm_posed = true
 
 func _restore_arm_pose() -> void:
+	# Rewriting an unchanged pose still invalidates every shadow map around him.
+	if not arm_posed: return
+	arm_posed = false
 	for bone_name in bone_ids:
 		skeleton.set_bone_pose_rotation(bone_ids[bone_name], base_poses[bone_name])
 

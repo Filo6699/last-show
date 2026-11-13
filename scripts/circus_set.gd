@@ -8,10 +8,17 @@ var locker:StaticBody3D
 var clinic_chair:Vector3
 var grain:NoiseTexture2D
 var arena_details:Node3D
+var trunk_name_ru:Label3D
+var trunk_lid:Node3D
+var trunk_lid_tween:Tween
+var trunk_open:=false
+var knife_rest_y:=0.0
 
 func setup(owner_game) -> void:
 	game=owner_game;name="CircusSetDressing"
 	make_grain();dress_floor();dress_canvas();arena();large_sets();dressing();service();clinic();outside()
+	russian_trunk_name()
+	open_trunk_mesh()
 	var presentation:=preload("res://scripts/scene_presentation.gd").new()
 	add_child(presentation);presentation.setup(game)
 	arena_details=preload("res://scripts/arena_details.gd").new()
@@ -19,6 +26,117 @@ func setup(owner_game) -> void:
 	var workrooms := preload("res://scripts/workroom_finish.gd").new()
 	add_child(workrooms);workrooms.setup(game)
 	batch()
+
+# Lili hides inside the trunk, so it needs a real opening. Cut the top cap off
+# the supplied mesh, line the inside, and hinge a separate lid on the far side
+# (away from the player's approach) that swings open when she jumps out.
+const TRUNK_RIM := .48
+const TRUNK_OPEN_ANGLE := -1.95
+func open_trunk_mesh() -> void:
+	var trunk:=game.model.find_child("StoryTrunk",true,false) as MeshInstance3D
+	if trunk==null:return
+	var arrays:Array=trunk.mesh.surface_get_arrays(0)
+	var vertices:PackedVector3Array=arrays[Mesh.ARRAY_VERTEX]
+	var indices:PackedInt32Array=arrays[Mesh.ARRAY_INDEX]
+	var kept:=PackedInt32Array()
+	for t in range(0,indices.size(),3):
+		var top:=true
+		for k in 3:
+			if vertices[indices[t+k]].y<TRUNK_RIM-.005:top=false
+		if top:continue
+		kept.append(indices[t]);kept.append(indices[t+1]);kept.append(indices[t+2])
+	arrays[Mesh.ARRAY_INDEX]=kept
+	var finish:Material=trunk.get_active_material(0)
+	var carved:=ArrayMesh.new();carved.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,arrays)
+	trunk.mesh=carved;trunk.set_surface_override_material(0,finish)
+	# Rim outline at the cut, sorted around the centre.
+	var rim:Array[Vector2]=[]
+	var seen:={}
+	for v in vertices:
+		if absf(v.y-TRUNK_RIM)>.005:continue
+		var key:=Vector2(snappedf(v.x,.001),snappedf(v.z,.001))
+		if seen.has(key):continue
+		seen[key]=true;rim.append(key)
+	rim.sort_custom(func(a:Vector2,b:Vector2)->bool:return atan2(a.y,a.x)<atan2(b.y,b.x))
+	# Dark lining: inward-facing walls and a floor, slightly inside the shell.
+	var lining:=SurfaceTool.new();lining.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var inner:=.94
+	for i in rim.size():
+		var a:Vector2=rim[i]*inner;var b:Vector2=rim[(i+1)%rim.size()]*inner
+		var quad:=[Vector3(a.x,TRUNK_RIM,a.y),Vector3(b.x,TRUNK_RIM,b.y),Vector3(b.x,-.42,b.y),Vector3(a.x,-.42,a.y)]
+		for idx in [0,2,1,0,3,2]:lining.add_vertex(quad[idx])
+		lining.add_vertex(Vector3(0,-.42,0));lining.add_vertex(Vector3(a.x,-.42,a.y));lining.add_vertex(Vector3(b.x,-.42,b.y))
+	lining.generate_normals()
+	var inside:=MeshInstance3D.new();inside.name="TrunkLining";inside.mesh=lining.commit()
+	var dark:=StandardMaterial3D.new();dark.albedo_color=Color("1d1512");dark.roughness=1;dark.cull_mode=BaseMaterial3D.CULL_DISABLED
+	inside.material_override=dark;trunk.add_child(inside);inside.set_meta("dynamic_set",true)
+	# False-bottom tray just under the rim: the knife rests here once it is open.
+	var tray:=SurfaceTool.new();tray.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in rim.size():
+		var a:Vector2=rim[i]*.93;var b:Vector2=rim[(i+1)%rim.size()]*.93
+		tray.add_vertex(Vector3(0,.44,0));tray.add_vertex(Vector3(b.x,.44,b.y));tray.add_vertex(Vector3(a.x,.44,a.y))
+	tray.generate_normals()
+	var tray_mesh:=MeshInstance3D.new();tray_mesh.name="TrunkTray";tray_mesh.mesh=tray.commit()
+	var tray_material:=StandardMaterial3D.new();tray_material.albedo_color=Color("3a1f22");tray_material.roughness=.9;tray_material.cull_mode=BaseMaterial3D.CULL_DISABLED
+	tray_mesh.material_override=tray_material;trunk.add_child(tray_mesh);tray_mesh.set_meta("dynamic_set",true)
+	# Lid: the cut cap rebuilt as a slab, hinged on the rim edge at local +X.
+	var hinge_x:=-INF
+	for p in rim:hinge_x=maxf(hinge_x,p.x)
+	trunk_lid=Node3D.new();trunk_lid.name="TrunkLid";trunk.add_child(trunk_lid)
+	trunk_lid.position=Vector3(hinge_x,TRUNK_RIM,0)
+	var slab:=SurfaceTool.new();slab.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var thick:=.025
+	for i in rim.size():
+		var a:Vector2=rim[i]-Vector2(hinge_x,0);var b:Vector2=rim[(i+1)%rim.size()]-Vector2(hinge_x,0)
+		var c:=Vector2(-hinge_x,0)
+		slab.add_vertex(Vector3(c.x,thick,c.y));slab.add_vertex(Vector3(b.x,thick,b.y));slab.add_vertex(Vector3(a.x,thick,a.y))
+		slab.add_vertex(Vector3(c.x,0,c.y));slab.add_vertex(Vector3(a.x,0,a.y));slab.add_vertex(Vector3(b.x,0,b.y))
+		var side:=[Vector3(a.x,0,a.y),Vector3(b.x,0,b.y),Vector3(b.x,thick,b.y),Vector3(a.x,thick,a.y)]
+		for idx in [0,1,2,0,2,3]:slab.add_vertex(side[idx])
+	slab.generate_normals()
+	var lid_mesh:=MeshInstance3D.new();lid_mesh.name="LidSlab";lid_mesh.mesh=slab.commit();lid_mesh.material_override=finish
+	trunk_lid.add_child(lid_mesh);lid_mesh.set_meta("dynamic_set",true);trunk_lid.set_meta("dynamic_set",true)
+	knife_rest_y=0.0
+
+func set_trunk_open(value:bool,animate:=false) -> void:
+	if trunk_lid==null:return
+	if trunk_lid_tween and trunk_lid_tween.is_valid():trunk_lid_tween.kill()
+	trunk_open=value
+	var angle:=TRUNK_OPEN_ANGLE if value else 0.0
+	if animate:
+		trunk_lid_tween=create_tween()
+		trunk_lid_tween.tween_property(trunk_lid,"rotation:z",angle,.28).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	else:trunk_lid.rotation.z=angle
+	# Closed: the knife lies on the lid. Open: on the tray inside the rim.
+	var drop:=-.09 if value else 0.0
+	# The pickup box stays where it was: the trunk's collision keeps its top,
+	# and a box sunk below it would be unreachable.
+	if is_instance_valid(knife):knife.position.y=drop
+
+# The supplied trunk lid spells the name in Latin letters as an extruded mesh.
+# Keep that node (story code shows it and frames the camera on it) but stop
+# drawing it, and lay the Russian name flat in its place, readable from above.
+func russian_trunk_name() -> void:
+	var source: MeshInstance3D = game.model.find_child("Trunk name", true, false)
+	if source == null: return
+	var bounds: AABB = source.global_transform * source.get_aabb()
+	source.layers = 0
+	source.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var label := Label3D.new()
+	label.name = "TrunkNameRu"
+	label.text = "РИЧАРД"
+	label.font = preload("res://assets/fonts/DejaVuSerif.ttf")
+	label.font_size = 64
+	label.pixel_size = .5 / label.font.get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 64).x
+	label.modulate = Color("e4d3ad")
+	label.outline_size = 6
+	label.outline_modulate = Color("2a1d17")
+	label.shaded = true
+	# Same diagonal as the supplied lettering; text faces up.
+	var up_on_lid := Vector3(-.707107, 0, -.707107)
+	add_child(label)
+	trunk_name_ru = label
+	label.global_transform = Transform3D(Basis(up_on_lid.cross(Vector3.UP), up_on_lid, Vector3.UP), bounds.get_center() + Vector3(0, bounds.size.y * .5 + .004, 0))
 
 func make_grain() -> void:
 	grain=NoiseTexture2D.new();grain.width=256;grain.height=256;grain.seamless=true
@@ -154,11 +272,14 @@ func arena() -> void:
 	var trunk:MeshInstance3D=game.model.find_child("StoryTrunk",true,false)
 	var bounds:AABB=trunk.global_transform*trunk.get_aabb()
 	var height:float=bounds.end.y+.027
-	var handle:=box(Vector3(.38,height,.25),Vector3(.07,.05,.25),"3e3029")
-	var blade:=box(Vector3(.38,height,.03),Vector3(.06,.025,.21),"b0b6ad",false,.8)
-	handle.reparent(knife,true);blade.reparent(knife,true)
+	# Colours follow the artist's item drawing: black grip, steel guard and pommel.
+	var handle:=box(Vector3(.38,height,.25),Vector3(.06,.045,.24),"1e1d22")
+	var blade:=box(Vector3(.38,height,.03),Vector3(.06,.02,.21),"aeb2bc",false,.8)
+	var guard:=box(Vector3(.38,height+.004,.132),Vector3(.12,.035,.024),"8e9099",false,.8)
+	var pommel:=box(Vector3(.38,height+.002,.378),Vector3(.085,.03,.018),"8e9099",false,.8)
+	for part in [handle,blade,guard,pommel]:part.reparent(knife,true)
 	var pickup:=target("knife",Vector3(.38,height+.04,.14),Vector3(.3,.13,.5),"Взять нож")
-	pickup.set_meta("outline_meshes",[handle,blade]);knife.set_meta("target",pickup)
+	pickup.set_meta("outline_meshes",[handle,blade,guard,pommel]);knife.set_meta("target",pickup)
 
 func training_rack() -> void:
 	# One clean, supported bar replaces the imported rack's intersecting bars.
@@ -230,7 +351,8 @@ func dressing() -> void:
 
 func service() -> void:
 	var x:float=game.layout.SERVICE_X;var z:float=game.layout.SERVICE_START
-	plaque("ТОЛЬКО ДЛЯ\nПЕРСОНАЛА",Vector3(x,2.9,z-.18),1.7,.6,PI)
+	# One line, so the sign fits between the door head and the vestibule ceiling.
+	plaque("ТОЛЬКО ДЛЯ ПЕРСОНАЛА",Vector3(x,2.84,z-.18),2.1,.3,PI)
 	# The corridor floor overlaps the clinic floor by 20 cm in the doorway, both
 	# at y=0. Sink the walnut 1 cm (visual only) so the clinic floor wins there.
 	var corridor_floor:Node3D=game.model.find_child("Service floor",true,false)
@@ -240,9 +362,6 @@ func service() -> void:
 		for offset in [2.5,5.8]:
 			rod(Vector3(x+side*1.28,.25,z+offset),Vector3(x+side*1.28,2.8,z+offset),.04,"4f6563",.6)
 			braces=blocker(Vector3(x+side*1.3,1.4,z+offset),Vector3(.14,2.8,.14),0.0,braces)
-	for offset in [1.4,4.4,6.8]:
-		box(Vector3(x+.98,.025,z+offset),Vector3(.23,.018,.42),"6e6551")
-		rod(Vector3(x+1.1,.06,z+offset),Vector3(x+.8,.06,z+offset+.3),.025,"90988d",.7)
 	box(Vector3(x-1.1,1.5,z+3.8),Vector3(.32,.7,.5),"485653",true,.5)
 	plaque("220 В",Vector3(x-.92,1.6,z+3.8),.35,.22,PI/2)
 	for offset in [2.5,5.4]:
@@ -263,22 +382,41 @@ func clinic() -> void:
 		box(at+Vector3(side*.37,.85,-.15),Vector3(.12,.07,.9),"87724f")
 	# Tables along the side wall leave the entire main approach unobstructed.
 	table(c+Vector3(-2.6,0,-.8),1.0,1.8,"86978d")
-	for i in 4:
-		rod(c+Vector3(-2.9+i*.16,.94,-1.25),c+Vector3(-2.9+i*.16,.94,-.75),.015,"b7bfb1",.85)
+	# Everything on the treatment table rests on its top (y .905 above c).
+	# Far end: a rimmed steel instrument tray with a scalpel and forceps.
+	var top:=.905
+	var tray_at:=c+Vector3(-2.72,top+.006,-1.38)
+	box(tray_at,Vector3(.36,.012,.5),"9aa49f",false,.75)
+	for side in [-1.0,1.0]:
+		box(tray_at+Vector3(side*.174,.022,0),Vector3(.012,.04,.5),"b4bcb6",false,.8)
+		box(tray_at+Vector3(0,.022,side*.244),Vector3(.36,.04,.012),"b4bcb6",false,.8)
+	rod(tray_at+Vector3(-.07,.016,.17),tray_at+Vector3(-.07,.016,-.05),.007,"c9cfca",.85)
+	var blade:=box(tray_at+Vector3(-.07,.012,-.09),Vector3(.016,.003,.08),"e2e6e3",false,.9)
+	blade.rotation.y=.08
+	for side in [-1.0,1.0]:
+		rod(tray_at+Vector3(.06,.012,.16),tray_at+Vector3(.06+side*.025,.012,-.12),.005,"c9cfca",.85)
+	# Near end: three small amber medicine bottles with dark caps.
 	for i in 3:
-		cylinder(c+Vector3(-2.9+i*.22,1.04,-.2),.055,.23,"a8c2aa")
+		var bottle_at:=c+Vector3(-2.95+i*.11,top,-.08-(i%2)*.07)
+		cylinder(bottle_at+Vector3(0,.06,0),.035,.12,"7a4a22",.1,14)
+		cylinder(bottle_at+Vector3(0,.135,0),.022,.03,"25211d",.0,12)
 	contract_paper=box(c+Vector3(-2.6,.929,-.65),Vector3(.43,.012,.58),"d4ceb1")
 	contract_paper.set_meta("dynamic_set",true)
-	var name_on_paper:=sign_text("RICHARD",c+Vector3(-2.6,.94,-.8),.26,0,"3a3a32")
+	var name_on_paper:=sign_text("РИЧАРД",c+Vector3(-2.6,.94,-.8),.26,0,"3a3a32")
 	name_on_paper.rotation.x=-PI/2;name_on_paper.reparent(contract_paper,true)
 	contract_target=target("contract",c+Vector3(-2.6,.97,-.65),Vector3(.5,.12,.65),"Рассмотреть документ")
 	contract_target.set_meta("outline_meshes",[contract_paper])
 	clinic_key=Node3D.new();clinic_key.set_meta("dynamic_set",true);add_child(clinic_key)
-	var hoop:=ring(c+Vector3(-2.4,.965,-.4),.05,.013,"cbb873")
-	var shaft:=rod(c+Vector3(-2.4,.965,-.45),c+Vector3(-2.4,.965,-.63),.014,"cbb873",.7)
-	var tooth:=box(c+Vector3(-2.37,.965,-.61),Vector3(.05,.025,.055),"cbb873",false,.7)
+	# Pale steel, as in the artist's key drawing. Walter leaves it on a folded
+	# white cloth beside the contract, where it reads at a glance.
+	var cloth_y:=.905+.012
+	var cloth:=box(c+Vector3(-2.33,.905+.006,-.3),Vector3(.2,.012,.3),"dcd8cb")
+	cloth.reparent(clinic_key,true)
+	var hoop:=ring(c+Vector3(-2.33,cloth_y+.012,-.2),.04,.011,"cfc8b4")
+	var shaft:=rod(c+Vector3(-2.33,cloth_y+.012,-.24),c+Vector3(-2.33,cloth_y+.012,-.42),.011,"cfc8b4",.3)
+	var tooth:=box(c+Vector3(-2.305,cloth_y+.012,-.4),Vector3(.04,.02,.045),"cfc8b4",false,.3)
 	for obj in [hoop,shaft,tooth]:obj.reparent(clinic_key,true)
-	var key_target:=target("roof_key",c+Vector3(-2.4,1,-.5),Vector3(.3,.15,.4),"Взять ключ от крыши")
+	var key_target:=target("roof_key",c+Vector3(-2.33,.98,-.3),Vector3(.3,.15,.42),"Взять ключ от крыши")
 	key_target.set_meta("outline_meshes",[hoop,shaft,tooth]);clinic_key.set_meta("target",key_target)
 	# Tall clinic locker has an opening door and a real dark interior.
 	var loc:=c+Vector3(-2.7,0,2.2)
@@ -323,6 +461,10 @@ func sync() -> void:
 	var available:bool=game.flags.get("richard_name_seen",false)
 	var nameplate:Node3D=game.model.find_child("Trunk name",true,false)
 	if nameplate:nameplate.visible=available
+	if trunk_name_ru:trunk_name_ru.visible=available
+	# Open from the moment Lili jumps out; the reveal itself animates the lid.
+	var lili_out:bool=game.flags.get("lili_visible",false) or game.phase not in ["intro","news","to_dressing","mirror","elsa_dressing","to_hall","lili"]
+	if lili_out!=trunk_open and not (trunk_lid_tween and trunk_lid_tween.is_valid()):set_trunk_open(lili_out)
 	knife.visible=available and not game.flags.get("knife",false)
 	knife.get_meta("target").collision_layer=16 if knife.visible else 0
 	clinic_key.visible=game.flags.get("contract_signed",false) and not game.flags.get("roof_key",false)

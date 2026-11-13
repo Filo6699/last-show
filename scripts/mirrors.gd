@@ -22,6 +22,7 @@ const RESOLUTION_STEP := 32
 const MOBILE_HEIGHT := 448
 const DESKTOP_HEIGHT := 1080
 var walk_axis := Vector3.RIGHT
+var body_at_rest := false
 var smile := false
 var cinematic := false
 var saved_rotation := Quaternion.IDENTITY
@@ -254,6 +255,14 @@ func animate_body(delta: float) -> void:
 	var local_step: Vector3 = avatar.global_basis.inverse() * velocity
 	if speed > .05:
 		walk_axis = walk_axis.lerp(Vector3(local_step.z, 0, -local_step.x).normalized(), 1.0-exp(-12.0*delta)).normalized()
+	# Standing still: settle on the authored pose once, then leave the skeleton
+	# alone. Every bone write re-renders the shadow maps of the lights around him.
+	if walk_weight < .001:
+		if body_at_rest: return
+		body_at_rest = true
+		walk_weight = 0.0
+	else:
+		body_at_rest = false
 	var axis := walk_axis
 	for side in ["L", "R"]:
 		var phase: float = gait + (PI if side == "R" else 0.0)

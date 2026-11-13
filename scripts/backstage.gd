@@ -110,7 +110,10 @@ func front_wall() -> void:
 func side_walls() -> void:
 	# Short stretch of stand side face between the curtain wall and the room.
 	var corner := Vector3(WEST_X, 0, WEST_X / tan(deg_to_rad(NW_EDGE)))
-	panel(edge_point(NW_EDGE, FRONT_RADIUS - .3), corner, HEIGHT, .2, WALL)
+	# Step nosings of the stand sector overhang its radial edge; a thicker face
+	# set into the room hides them.
+	var inward := Vector3(cos(deg_to_rad(NW_EDGE)), 0, -sin(deg_to_rad(NW_EDGE)))
+	panel(edge_point(NW_EDGE, FRONT_RADIUS - .3) + inward * .15, corner + inward * .15, HEIGHT, .5, WALL)
 	# West wall with the dressing passage, east wall plain.
 	var near := passage_crossing(PASSAGE_ORIGIN + PASSAGE_ACROSS * 1.48)
 	var far := passage_crossing(PASSAGE_ORIGIN - PASSAGE_ACROSS * 1.48)
@@ -167,13 +170,8 @@ func service_vestibule() -> void:
 	for x in [game.layout.SERVICE_X - 1.4, game.layout.SERVICE_X + 1.4]:
 		panel(Vector3(x, 0, BACK_Z), Vector3(x, 0, finish), DECK_Y, .14, "3a3330", true, "wood")
 	box(Vector3(game.layout.SERVICE_X, 3.05, (BACK_Z + .1 + finish) * .5), Vector3(2.66, .1, finish - BACK_Z - .1), "4a4440", false, 0.0, "VestibuleCeiling", "wood")
-	var z := BACK_Z + 3.6
-	rod(Vector3(game.layout.SERVICE_X, 3.0, z), Vector3(game.layout.SERVICE_X, 2.8, z), .012, "40403a")
-	var shade := cylinder(Vector3(game.layout.SERVICE_X, 2.77, z), .2, .1, "343631", .3)
-	shade.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var bulb := sphere(Vector3(game.layout.SERVICE_X, 2.69, z), Vector3.ONE * .08, "e8dcc0")
-	bulb.material_override = material("e8dcc0", 0, .5, 1.1)
-	point_light(Vector3(game.layout.SERVICE_X, 2.55, z), "e1d3b4", .7, 5.0)
+	# No pendant here: circus_lighting already hangs one (Practical2) 1.2 m
+	# away, and two fittings side by side read as one doubled lamp.
 
 func passage_mouth() -> void:
 	# The dressing passage runs through a slot cut in the NW stand foundation.
@@ -199,11 +197,28 @@ func passage_crossing(point: Vector3) -> Vector3:
 
 func furnish() -> void:
 	# A few working pieces along the side walls; the route between doors is clear.
-	crate(Vector3(EAST_X + .6, 0, 36.6), Vector3(.9, .75, .75), .05)
-	crate(Vector3(EAST_X + .55, 0, 37.6), Vector3(.8, .6, .7), -.04)
-	crate(Vector3(EAST_X + .6, .75, 36.7), Vector3(.7, .5, .6), .12)
-	asset("rope_coil", Vector3(EAST_X + .9, 0, 34.6), .8, .7, false)
+	crate(Vector3(EAST_X - .6, 0, 36.6), Vector3(.9, .75, .75), .05)
+	crate(Vector3(EAST_X - .55, 0, 37.6), Vector3(.8, .6, .7), -.04)
+	crate(Vector3(EAST_X - .6, .75, 36.7), Vector3(.7, .5, .6), .12)
+	asset("rope_coil", Vector3(EAST_X - .8, 0, 35.2), .8, .7, false)
+	costume_rail(-17.4, -14.6, BACK_Z - .45)
 	asset("wardrobe", Vector3(WEST_X + .45, 0, 37.2), PI / 2, 1.0, true)
+
+func costume_rail(x0: float, x1: float, z: float) -> void:
+	for x in [x0, x1]:
+		rod(Vector3(x, 0, z), Vector3(x, 1.85, z), .025, "6f6a5f", .6)
+		box(Vector3(x, .02, z), Vector3(.08, .04, .5), "4a4740", false, .5)
+	rod(Vector3(x0, 1.85, z), Vector3(x1, 1.85, z), .02, "8a8478", .7)
+	blocker(Vector3((x0 + x1) * .5, .9, z), Vector3(x1 - x0 + .1, 1.8, .5))
+	var colors := ["6b2232", "2f3d52", "7a6a3a", "40553f", "5b1d2b", "8c7b62", "3a2f45"]
+	var x := x0 + .3
+	var i := 0
+	while x < x1 - .25:
+		var length := .95 + .25 * float(i % 3)
+		rod(Vector3(x, 1.85, z), Vector3(x, 1.76, z), .006, "8a8478", .7)
+		box(Vector3(x, 1.76 - length * .5, z), Vector3(.05, length, .46 - .06 * float(i % 2)), colors[i % colors.size()], false, 0.0, "BackstageCostume", "cloth")
+		x += .2 + .06 * float((i * 7) % 3)
+		i += 1
 
 func in_passage_slot(p: Vector3) -> bool:
 	var offset := p - PASSAGE_ORIGIN
@@ -255,22 +270,45 @@ func carve_stand_wall() -> void:
 			shape.shape = collision
 
 func close_tent_mouth() -> void:
-	# The dressing tent's supplied doorway is far wider than the passage. Close
-	# the rest of it with a plain flap just outside the canvas.
+	# The dressing tent's supplied doorway is far wider than the passage. A
+	# straight flap left a wedge of empty yard between it and the curved canvas,
+	# so the closure now follows the canvas arc just outside it: from the inside
+	# it only shows through the doorway, and the passage walls run into it.
 	var centre := Vector3(-48.1356, 0, 40.1154)
-	var mouth := PASSAGE_ORIGIN + PASSAGE_DIR * 11.32
-	var normal := (mouth - centre).normalized()
-	var tangent := Vector3(-normal.z, 0, normal.x)
-	var base := centre + normal * 10.45
-	var cuts: Array[float] = []
+	var radius := 10.65
+	var ends: Array[float] = []
 	for side in [-1.56, 1.56]:
-		var point: Vector3 = PASSAGE_ORIGIN + PASSAGE_ACROSS * side
-		var along := (base - point).dot(normal) / PASSAGE_DIR.dot(normal)
-		cuts.append((point + PASSAGE_DIR * along - base).dot(tangent))
-	cuts.sort()
-	for span in [[-4.6, cuts[0]], [cuts[1], 4.6]]:
-		panel(base + tangent * span[0], base + tangent * span[1], 6.0, .12, "4a1d29", true, "cloth")
-	panel(base + tangent * cuts[0], base + tangent * cuts[1], 2.7, .12, "4a1d29", true, "cloth", 3.3)
+		var start: Vector3 = PASSAGE_ORIGIN + PASSAGE_ACROSS * side
+		# March along the passage wall until it reaches the arc.
+		var t := 0.0
+		while t < 16.0 and Vector2(start.x + PASSAGE_DIR.x * t - centre.x, start.z + PASSAGE_DIR.z * t - centre.z).length() > radius:
+			t += .02
+		var hit := start + PASSAGE_DIR * t
+		ends.append(atan2(hit.z - centre.z, hit.x - centre.x))
+	var low := minf(ends[0], ends[1])
+	var high := maxf(ends[0], ends[1])
+	var step := deg_to_rad(4.0)
+	var spans: Array = []
+	# Full-height canvas either side of the passage, 44 degrees each way.
+	var angle := low
+	while angle > low - deg_to_rad(44.0):
+		spans.append([angle - step, angle, 0.0, 6.0]); angle -= step
+	angle = high
+	while angle < high + deg_to_rad(44.0):
+		spans.append([angle, angle + step, 0.0, 6.0]); angle += step
+	# Header over the passage roof.
+	var segments := maxi(1, int(ceil((high - low) / step)))
+	for i in segments:
+		var a0 := lerpf(low, high, float(i) / segments)
+		var a1 := lerpf(low, high, float(i + 1) / segments)
+		spans.append([a0, a1, 3.3, 2.7])
+	for span in spans:
+		var p0 := centre + Vector3(cos(span[0]), 0, sin(span[0])) * radius
+		var p1 := centre + Vector3(cos(span[1]), 0, sin(span[1])) * radius
+		# Slight overlap so neighbouring panels never show a seam.
+		var mid := (p0 + p1) * .5
+		var dir := (p1 - p0).normalized()
+		panel(mid - dir * (p0.distance_to(p1) * .5 + .04), mid + dir * (p0.distance_to(p1) * .5 + .04), span[3], .12, "4a1d29", true, "cloth", span[2])
 
 func seal_yard() -> void:
 	# The open ground between the tents, the passage and the service corridor is

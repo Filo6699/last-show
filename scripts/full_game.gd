@@ -38,7 +38,7 @@ func objective(phase:String) -> Array:
 		"roof_key":["КЛЮЧ","Взять ключ со стола Вальтера"],
 		"return_arena":["ПОСЛЕ ПРЕДСТАВЛЕНИЯ","Вернуться на манеж"],
 		"roof_access":["ЗА СЦЕНОЙ","Найти лестницу на крышу за сценой"],
-		"roof":["ПОД КУПОЛОМ","Пройти по мосткам к батуту"],
+		"roof":["ПОД КУПОЛОМ","Пройти по канату к батуту"],
 		"home":["ДОМ","Посмотреть в зеркало в ванной"],
 		"bathroom":["ОТРАЖЕНИЕ",""],
 		"trapped":["ЗАПЕРТО","Открыть шкафчик"],
@@ -55,7 +55,8 @@ func objective_goal(phase:String):
 		"return_arena","roof_access":return late.roof_door.global_position
 		"roof":
 			# The catwalk is an L: the long strip passes the rope, then turns east.
-			if p.z<-3.9:return Vector3(-10,late.ROOF_FLOOR,-2)
+			if p.z<-3.9 and p.x<0:return Vector3(-10,late.ROOF_FLOOR,-2)
+			if p.z<-3.9:return Vector3(late.EAST_MAST_X,late.ROOF_FLOOR,-2)
 			return late.TRAMPOLINE
 		"home":
 			# Bedroom first, through the doorway in the north wall.
@@ -82,7 +83,7 @@ func interact(id:StringName) -> bool:
 		"knife":
 			if game.flags.get("richard_name_seen",false) and not game.flags.get("knife",false):
 				game.flags.knife=true;game.audio.play("sfx_knife_pickup",-9,game.layout.TRUNK)
-				game.hud.show_notice("Как он тут оказался?")
+				game.hud.show_item_card("knife","Как он тут оказался?")
 				sync();game.save_game()
 		"tickets": game.audio.ui()
 		"television": game.start_dialogue("television")
@@ -91,7 +92,7 @@ func interact(id:StringName) -> bool:
 		"roof_key":
 			if game.flags.get("contract_signed",false) and not game.flags.get("roof_key",false):
 				game.flags.roof_key=true;game.phase="return_arena"
-				game.audio.play("sfx_key_pickup",-8);game.hud.show_notice("Ключ от крыши")
+				game.audio.play("sfx_key_pickup",-8);game.hud.show_item_card("roof_key")
 				game.update_staging();game.save_game()
 		"locker":
 			if game.phase=="trapped":game.start_dialogue("ending_locker")
@@ -100,10 +101,8 @@ func interact(id:StringName) -> bool:
 		"roof_door":
 			if game.phase not in ["return_arena","roof_access"]:
 				game.audio.play("sfx_door_locked", -9, late.roof_door.global_position)
-			elif game.flags.get("roof_key",false) or game.flags.get("hairpin",false):
-				game.flags.roof_open=true
-				game.audio.play("sfx_service_door_open",-8,late.roof_door.global_position)
-				transfer(late.ROOF_ENTRY,late.ROPE,"roof")
+			elif game.flags.get("roof_key",false) or game.flags.get("roof_open",false):open_roof_door()
+			elif game.flags.get("hairpin",false):game.start_lockpick("roof",5)
 			else:game.audio.play("sfx_door_locked", -9, late.roof_door.global_position)
 		"roof_return":game.start_dialogue("roof_descent")
 		"roof_rope":
@@ -115,6 +114,11 @@ func interact(id:StringName) -> bool:
 				game.start_dialogue("home_recovery" if game.flags.get("rope_cut",false) else "home_host")
 		_ :return false
 	return true
+
+func open_roof_door() -> void:
+	game.flags.roof_open=true
+	game.audio.play("sfx_service_door_open",-8,late.roof_door.global_position)
+	transfer(late.ROOF_ENTRY,late.ROPE,"roof")
 
 func finish_dialogue(id:String) -> bool:
 	match id:
@@ -216,7 +220,8 @@ func event(id:String) -> bool:
 			active_tween = create_tween()
 			active_tween.tween_property(set_dressing.locker.get_meta("hinge"), "rotation:y", 1.45, .16)
 			game.frame_player_at(apparition.position+Vector3(0,1.25,0),.15)
-			game.sound("lili_glimpse");game.hud.scare()
+			game.sound("lili_glimpse")
+			get_tree().create_timer(.3).timeout.connect(func(): if is_instance_valid(game): game.screamer.play())
 		_:return false
 	return true
 
@@ -237,39 +242,78 @@ func jump_home() -> void:
 	if active_tween and active_tween.is_valid():active_tween.kill()
 	game.transitioning=true;game.player.set_locked(true)
 	var token:int=game.session
-	# Richard steps onto the trampoline, bounces once and is thrown up through
-	# the torn canvas. In flight he looks back down at the circus while the
-	# picture slowly fades to black under the wind.
-	var camera:Camera3D=game.player.camera
+	# Richard looks down into the dark ring forty metres below, then at the
+	# trampoline, climbs onto it, looks up into the one tear in the canvas
+	# right above it, bounces twice and is thrown straight up through it.
+	var player:Node3D=game.player
+	var camera:Camera3D=player.camera
 	var eye_height:float=camera.position.y
 	var breach:Vector3=game.location.stage_show.ROOF_BREACH_CENTER
 	var bed:=Vector3(late.TRAMPOLINE.x,late.ROOF_FLOOR+.68,late.TRAMPOLINE.z)
-	game.player.set_physics_process(false)
+	var start:Vector3=player.global_position
+	player.set_physics_process(false)
+	var yaw0:float=player.rotation.y
+	var pitch0:float=camera.rotation.x
+	var yaw_to:=func(target:Vector3)->float:
+		var d:Vector3=target-player.global_position
+		return atan2(-d.x,-d.z)
+	# tween_method passes t first; bound arguments follow it.
+	var look:=func(t:float,yaw_a:float,yaw_b:float,pitch_a:float,pitch_b:float):
+		player.rotation.y=lerp_angle(yaw_a,yaw_b,t);camera.rotation.x=lerpf(pitch_a,pitch_b,t)
+	# 1. Down, over the deck edge, into the arena.
+	var edge_yaw:float=yaw_to.call(Vector3(late.TRAMPOLINE.x,start.y,start.z+3.0))
 	active_tween=create_tween()
-	active_tween.tween_property(game.player,"global_position",bed,.9).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	active_tween.parallel().tween_property(camera,"rotation:x",.35,.9)
-	active_tween.tween_property(camera,"position:y",eye_height-.4,.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	active_tween.tween_callback(func():game.audio.play("sfx_roof_jump",-8))
-	active_tween.tween_property(camera,"position:y",eye_height,.12)
+	active_tween.tween_method(look.bind(yaw0,edge_yaw,pitch0,-1.15),0.0,1.0,1.2).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	active_tween.tween_interval(.9)
+	# 2. At the trampoline.
+	var bed_yaw:float=yaw_to.call(bed)
+	active_tween.tween_method(look.bind(edge_yaw,bed_yaw,-1.15,-.55),0.0,1.0,1.0).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	active_tween.tween_interval(.5)
+	await active_tween.finished
+	if token!=game.session:return
+	# 3. Walk up to the frame and climb onto the bed: a step up over the rail,
+	# then a small sink as the bed takes his weight.
+	var to_bed:Vector3=bed-start;to_bed.y=0
+	var approach:Vector3=bed-to_bed.normalized()*minf(1.2,to_bed.length())
+	approach.y=start.y
+	active_tween=create_tween()
+	active_tween.tween_property(player,"global_position",approach,maxf(.3,start.distance_to(approach)/1.6)).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	active_tween.parallel().tween_property(camera,"rotation:x",-.35,.6)
+	active_tween.tween_property(player,"global_position",approach.lerp(bed,.5)+Vector3(0,bed.y-start.y+.35,0),.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	active_tween.tween_property(player,"global_position",bed,.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	active_tween.tween_property(camera,"position:y",eye_height-.12,.15)
+	active_tween.tween_property(camera,"position:y",eye_height,.25)
+	# 4. Up, into the tear.
+	var pitch_up:=1.42
+	active_tween.tween_property(camera,"rotation:x",pitch_up,1.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	active_tween.tween_interval(.8)
+	# 5. Two small bounces, then the throw.
+	for height in [.35,.7]:
+		active_tween.tween_property(camera,"position:y",eye_height-.3,.18).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		active_tween.tween_callback(func():game.audio.play("sfx_roof_jump",-12))
+		active_tween.tween_property(player,"global_position:y",bed.y+height,.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		active_tween.parallel().tween_property(camera,"position:y",eye_height,.15)
+		active_tween.tween_property(player,"global_position:y",bed.y,.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	active_tween.tween_property(camera,"position:y",eye_height-.45,.22).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	active_tween.tween_callback(func():game.audio.play("sfx_roof_jump",-6))
 	await active_tween.finished
 	if token!=game.session:return
 	var wind:=AudioStreamPlayer.new();wind.stream=load("res://assets/audio/full_game/sfx_escape_wind.wav")
 	wind.volume_db=-10;add_child(wind);wind.play()
+	# 6. Straight up through the tear and out into the night.
 	active_tween=create_tween()
-	active_tween.tween_property(game.player,"global_position",Vector3(breach.x,breach.y+16.0,breach.z),3.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	# Look back and down into the tent through the tear.
-	active_tween.parallel().tween_property(camera,"rotation:x",-1.25,1.6).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	active_tween.parallel().tween_property(game.player,"rotation:y",game.player.rotation.y+PI,1.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	active_tween.tween_property(camera,"position:y",eye_height,.2)
+	active_tween.parallel().tween_property(player,"global_position",Vector3(breach.x,breach.y+14.0,breach.z),2.4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	var fade:ColorRect=game.hud.fade
 	fade.modulate.a=0;fade.show()
-	active_tween.parallel().tween_property(fade,"modulate:a",1.0,2.6).set_delay(1.4)
+	active_tween.parallel().tween_property(fade,"modulate:a",1.0,1.6).set_delay(1.3)
 	await active_tween.finished
 	if token!=game.session:return
 	var hush:=create_tween();hush.tween_property(wind,"volume_db",-40.0,1.2);hush.tween_callback(wind.queue_free)
-	game.player.set_physics_process(true)
+	player.set_physics_process(true)
 	camera.position.y=eye_height;camera.rotation.x=0
 	game.phase="home";game.place_player(late.HOME+Vector3(0,0,1.8),late.HOME+Vector3(-2.4,1.3,.3))
-	game.last_safe_position=game.player.position;game.update_staging()
+	game.last_safe_position=player.position;game.update_staging()
 	await game.hud.transition_in()
 	if token!=game.session:return
 	game.transitioning=false;game.start_dialogue("wake_home")
@@ -337,12 +381,12 @@ func sync() -> void:
 			for light in hidden_show_lights:
 				if is_instance_valid(light):light.light_energy=hidden_show_lights[light]
 			hidden_show_lights.clear()
-	game.hud.item.text=" · ".join(inventory())
+	game.hud.set_inventory(inventory())
 
 func inventory() -> PackedStringArray:
 	var result:=PackedStringArray()
-	for entry in [["knife","Нож"],["hairpin","Невидимка"],["roof_key","Ключ от крыши"]]:
-		if game.flags.get(entry[0],false):result.append(entry[1])
+	for id in ["knife","hairpin","roof_key"]:
+		if game.flags.get(id,false):result.append(id)
 	return result
 
 func check_walk_progress() -> void:

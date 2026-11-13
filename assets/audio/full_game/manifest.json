@@ -5,5 +5,10 @@
   "sfx_rope_cut": "res://assets/audio/full_game/sfx_rope_cut.wav",
   "sfx_roof_jump": "res://assets/audio/full_game/sfx_roof_jump.wav",
   "sfx_key_pickup": "res://assets/audio/full_game/sfx_key_pickup.wav",
-  "sfx_knife_pickup": "res://assets/audio/full_game/sfx_knife_pickup.wav"
+  "sfx_knife_pickup": "res://assets/audio/full_game/sfx_knife_pickup.wav",
+  "sfx_breath_panic": "res://assets/audio/full_game/sfx_breath_panic.wav",
+  "sfx_heartbeat": "res://assets/audio/full_game/sfx_heartbeat.wav",
+  "sfx_whisper": "res://assets/audio/full_game/sfx_whisper.wav",
+  "sfx_flashlight_click": "res://assets/audio/full_game/sfx_flashlight_click.wav",
+  "sfx_escape_wind": "res://assets/audio/full_game/sfx_escape_wind.wav"
 }

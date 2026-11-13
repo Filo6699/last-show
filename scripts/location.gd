@@ -29,41 +29,42 @@ func setup(owner_game: Node3D) -> void:
 	photo_target.rotation.y=-PI/2
 	add_child(photo_target)
 	var shape := CollisionShape3D.new()
-	var box := BoxShape3D.new(); box.size = Vector3(4,1.8,.18)
+	var box := BoxShape3D.new(); box.size = Vector3(5,1.8,.18)
 	shape.shape = box; photo_target.add_child(shape)
 	photo_target.interacted.connect(game.on_interact)
 	game.targets["photos"] = [photo_target]
+	var photo_row = preload("res://scripts/clinic_photo_reveal.gd")
 	for i in 3:
 		var id: String = ["bruno","elsa","lili"][i]
+		var at := Vector3(photo_row.ROW_X[i], 0, photo_row.CARD_Z)
 		var pair := StaticBody3D.new()
 		pair.name = "PhotoPair" + id.capitalize()
 		pair.set_script(preload("res://scripts/interactable.gd"))
 		pair.interaction_id = StringName("photo_" + id)
 		pair.prompt = "Рассмотреть фотографию"
 		pair.collision_layer = 16
-		pair.position = Vector3((i-1)*1.35, .55, .15)
+		pair.position = at + Vector3(0, 0, -.035)
+		pair.set_meta("focus_point", Vector3(0, 0, .035))
 		var hitbox := CollisionShape3D.new()
-		var bounds := BoxShape3D.new(); bounds.size = Vector3(1.05, 1.1, .12)
+		var bounds := BoxShape3D.new(); bounds.size = Vector3(.88, 1.16, .15)
 		hitbox.shape = bounds
 		photo_target.add_child(pair); pair.add_child(hitbox)
 		pair.interacted.connect(game.on_interact)
 		game.targets["photo_" + id] = [pair]
-		var prints: Array[MeshInstance3D] = []
-		for row in 1:
-			var frame := MeshInstance3D.new()
-			var quad := QuadMesh.new();quad.size = Vector2(.86,.86)
-			frame.mesh = quad
-			var material := StandardMaterial3D.new()
-			material.albedo_texture = game.database.get_photo(id,true)
-			material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
-			material.albedo_color = Color(.85,.83,.78) if material.albedo_texture else Color(.18,.17,.16)
-			frame.material_override=material
-			frame.position=Vector3((i-1)*1.35,.55-row*1.02,.12)
-			photo_target.add_child(frame)
-			prints.append(frame)
-			var caption := Label3D.new();caption.text="ДО · "+game.database.SPEAKERS[id]
-			caption.font_size=32;caption.pixel_size=.003;caption.position=frame.position+Vector3(0,-.48,.015);photo_target.add_child(caption)
-		pair.set_meta("outline_meshes", prints)
+		# Same board as the covered child photograph, flush against the wall.
+		var board := MeshInstance3D.new()
+		var board_mesh := BoxMesh.new(); board_mesh.size = photo_row.CARD_SIZE
+		board.mesh = board_mesh
+		var board_material := StandardMaterial3D.new()
+		board_material.albedo_color = Color("392c27"); board_material.roughness = .86
+		board.material_override = board_material
+		board.position = at
+		photo_target.add_child(board)
+		var photo_tint := Color(.85,.83,.78) if game.database.get_photo(id,true) else Color(.18,.17,.16)
+		game.photo_puzzle.build_wall(id, photo_target, at+Vector3(0,.1,.029), Vector2(.72,.72), photo_tint)
+		var caption := Label3D.new();caption.text="ДО · "+game.database.SPEAKERS[id]
+		caption.font_size=32;caption.pixel_size=.0028;caption.position=at+Vector3(0,-.42,.031);photo_target.add_child(caption)
+		pair.set_meta("outline_meshes", [board] + game.photo_puzzle.wall_meshes(id))
 	# The supplied covered print is replaced by the animated physical card.
 	# Hide its old coplanar paper/frame before static batching, including colliders.
 	for source in game.model.find_children("*", "MeshInstance3D", true, false):
@@ -203,10 +204,10 @@ func sync() -> void:
 	gates.dressing.prompt = "Отодвинуть занавес" if game.phase not in ["intro","news"] else "Гримёрная закрыта"
 	if technical_open:
 		gates.technical.prompt = "Служебный коридор"
-	elif game.phase in ["elsa_hall", "to_technical"]:
-		gates.technical.prompt = "Открыть служебную дверь"
 	else:
-		gates.technical.prompt = "Открыть замок невидимкой" if game.flags.get("hairpin",false) else "Служебная дверь заперта"
+		var locked_in: bool = game.phase in ["return_arena","roof_access"]
+		if not locked_in: gates.technical.prompt = "Открыть служебную дверь"
+		else: gates.technical.prompt = "Открыть замок невидимкой" if game.flags.get("hairpin",false) else "Служебная дверь заперта"
 
 func move_actor(id: String, target: Vector3, duration: float) -> void:
 	var actor: Node3D=game.actors[id]

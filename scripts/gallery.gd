@@ -2,7 +2,12 @@ extends "res://scripts/scene_parts.gd"
 ## Finished seating follows the actual imported treads, with clear radial aisles.
 var occupied: Array[Vector3] = []
 var seat_bases: Array[Basis] = []
-var parts := {}
+# Seat angle, transform and palette choice (coat, skin, hair, torso stretch).
+var people: Array = []
+const SECTORS := 12
+const COATS := ["33343d", "4c383c", "394541", "514536", "303d4c"]
+const SKINS := ["a38c76", "806455", "c0a48b"]
+const HAIRS := ["342e2a", "514338", "777266"]
 var hands: MultiMeshInstance3D
 var show
 var aisle_lights: Array[OmniLight3D] = []
@@ -92,16 +97,11 @@ func setup(owner_game, owner_show) -> void:
 			var at: Vector3 = hit.position + Vector3(0, .50, 0)
 			var basis := Basis(Vector3.UP, angle + PI)
 			occupied.append(at); seat_bases.append(basis)
-			var coat: String = ["33343d", "4c383c", "394541", "514536", "303d4c"][rng.randi_range(0, 4)]
-			var skin: String = ["a38c76", "806455", "c0a48b"][rng.randi_range(0, 2)]
-			part("torso", coat, Transform3D(basis.scaled(Vector3(1, rng.randf_range(.92, 1.08), 1)), at + Vector3(0, .38, 0)))
-			part("head", skin, Transform3D(basis, at + Vector3(0, .88, 0)))
-			part("hair", ["342e2a", "514338", "777266"][rng.randi_range(0, 2)], Transform3D(basis, at + Vector3(0, .99, -.015)))
-			for side in [-1, 1]:
-				part("thigh", "292c32", Transform3D(basis, at + basis * Vector3(side * .12, .06, .23)))
-				part("shin", "292c32", Transform3D(basis, at + basis * Vector3(side * .12, -.21, .39)))
-				part("shoe", "242326", Transform3D(basis, at + basis * Vector3(side * .12, -.41, .44)))
-				part("arm", coat, Transform3D(basis, at + basis * Vector3(side * .24, .33, .08)))
+			# Same random sequence as the seating itself: coat, skin, torso height, hair.
+			var coat := rng.randi_range(0, 4)
+			var skin := rng.randi_range(0, 2)
+			var stretch := rng.randf_range(.92, 1.08)
+			people.append([angle, Transform3D(basis, at), Color(coat, skin, rng.randi_range(0, 2), stretch)])
 	for section in 12: aisle(section * TAU / 12)
 	# Finish the back edge instead of leaving an exposed, apparently endless slab.
 	for index in 144:
@@ -137,8 +137,12 @@ func setup(owner_game, owner_show) -> void:
 	# one into each theatrical shadow map. They continue receiving light/shadows.
 	for visual in find_children("*","MeshInstance3D",true,false):
 		visual.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	batch()
+	# Benches and rails share a few materials and cast no shadows: sector-sized
+	# batches instead of 4 m lighting cells cut ~200 draw calls from the ring view.
+	var merged := Node3D.new(); merged.name = "SetBatches"; add_child(merged)
+	set_meta("statistics", preload("res://scripts/static_batches.gd").apply(self, merged, 14.0))
 	build_parts()
+	build_hands()
 	sync_lighting()
 
 func sync_lighting() -> void:
@@ -146,36 +150,72 @@ func sync_lighting() -> void:
 	for fill in aisle_lights:
 		fill.light_energy = .06 if empty_night else 1.10
 
-func part(kind: String, color: String, at: Transform3D) -> void:
-	var key := kind + ":" + color
-	if not parts.has(key): parts[key] = []
-	parts[key].append(at)
-
+# A whole spectator is one mesh, and each aisle-bounded sector is one MultiMesh.
+# The old per-part MultiMeshes each spanned the full ring, so all ~550k audience
+# triangles were drawn even when only a slice of the gallery was in view.
 func build_parts() -> void:
-	for key in parts:
-		var kind: String = key.split(":")[0]
-		var mesh: Mesh
-		if kind in ["head", "hair"]:
-			var head := SphereMesh.new(); head.radius = .125; head.height = .28
-			head.radial_segments = 8; head.rings = 4
-			if kind == "hair": head.height = .14; head.radius = .13
-			mesh = head
-		elif kind in ["torso", "arm"]:
-			var body := CapsuleMesh.new(); body.radius = .20 if kind == "torso" else .065
-			body.height = .58 if kind == "torso" else .39
-			body.radial_segments = 8; body.rings = 3; mesh = body
-		else:
-			var block := BoxMesh.new()
-			block.size = {"thigh": Vector3(.16, .17, .43), "shin": Vector3(.12, .46, .13), "shoe": Vector3(.16, .11, .29)}[kind]
-			mesh = block
+	var material := ShaderMaterial.new()
+	material.shader = preload("res://assets/shaders/audience.gdshader")
+	for palette in [["coat", COATS], ["skin", SKINS], ["hair", HAIRS]]:
+		for index in palette[1].size():
+			material.set_shader_parameter(palette[0] + str(index), swatch(palette[1][index]))
+	material.set_shader_parameter("trousers", swatch("292c32"))
+	material.set_shader_parameter("shoes", swatch("242326"))
+	var person := spectator_mesh()
+	var sectors := []
+	sectors.resize(SECTORS)
+	for index in SECTORS: sectors[index] = []
+	for entry in people:
+		sectors[int(wrapf(entry[0], 0, TAU) / TAU * SECTORS) % SECTORS].append(entry)
+	for index in SECTORS:
+		var members: Array = sectors[index]
+		if members.is_empty(): continue
 		var multi := MultiMesh.new(); multi.transform_format = MultiMesh.TRANSFORM_3D
-		multi.mesh = mesh; multi.instance_count = parts[key].size()
-		for index in multi.instance_count: multi.set_instance_transform(index, parts[key][index])
-		var node := MultiMeshInstance3D.new(); node.name = "Audience_" + kind
-		node.multimesh = multi; node.material_override = material(key.split(":")[1])
+		multi.use_custom_data = true; multi.mesh = person; multi.instance_count = members.size()
+		for slot in members.size():
+			multi.set_instance_transform(slot, members[slot][1])
+			multi.set_instance_custom_data(slot, members[slot][2])
+		var node := MultiMeshInstance3D.new(); node.name = "Audience%d" % index
+		node.multimesh = multi; node.material_override = material
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(node); show.audience.append(node)
-	var palm := SphereMesh.new(); palm.radius = .055; palm.height = .13; palm.radial_segments = 6; palm.rings = 3
+
+func swatch(hex: String) -> Color:
+	# Uniforms are source_color: the renderer converts sRGB exactly as for albedo.
+	return Color(hex)
+
+# Parts in seat space. UV.x carries the part id read by audience.gdshader:
+# 0 torso, 1 arm (coat), 2 head (skin), 3 hair, 4 trousers, 5 shoes.
+func spectator_mesh() -> ArrayMesh:
+	var torso := CapsuleMesh.new(); torso.radius = .20; torso.height = .58; torso.radial_segments = 8; torso.rings = 1
+	var arm := CapsuleMesh.new(); arm.radius = .065; arm.height = .39; arm.radial_segments = 6; arm.rings = 0
+	var head := SphereMesh.new(); head.radius = .125; head.height = .28; head.radial_segments = 8; head.rings = 4
+	var hair := SphereMesh.new(); hair.radius = .13; hair.height = .14; hair.radial_segments = 8; hair.rings = 3
+	var thigh := BoxMesh.new(); thigh.size = Vector3(.16, .17, .43)
+	var shin := BoxMesh.new(); shin.size = Vector3(.12, .46, .13)
+	var shoe := BoxMesh.new(); shoe.size = Vector3(.16, .11, .29)
+	var pieces := [[torso, 0, Vector3(0, .38, 0)], [head, 2, Vector3(0, .88, 0)], [hair, 3, Vector3(0, .99, -.015)]]
+	for side in [-1, 1]:
+		pieces.append([thigh, 4, Vector3(side * .12, .06, .23)])
+		pieces.append([shin, 4, Vector3(side * .12, -.21, .39)])
+		pieces.append([shoe, 5, Vector3(side * .12, -.41, .44)])
+		pieces.append([arm, 1, Vector3(side * .24, .33, .08)])
+	var builder := SurfaceTool.new()
+	builder.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for piece in pieces:
+		var arrays: Array = piece[0].get_mesh_arrays()
+		var points: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+		var tag := Vector2(piece[1], 0)
+		for index in indices:
+			builder.set_uv(tag); builder.set_normal(normals[index])
+			builder.add_vertex(points[index] + piece[2])
+	builder.index()
+	return builder.commit()
+
+func build_hands() -> void:
+	var palm := SphereMesh.new(); palm.radius = .055; palm.height = .13; palm.radial_segments = 4; palm.rings = 2
 	var multi := MultiMesh.new(); multi.transform_format = MultiMesh.TRANSFORM_3D; multi.mesh = palm
 	multi.instance_count = occupied.size() * 2
 	for index in occupied.size():

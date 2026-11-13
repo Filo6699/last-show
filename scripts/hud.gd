@@ -7,6 +7,7 @@ var current_voice := ""
 signal interaction_requested
 signal advance_requested
 signal choice_selected(index: int)
+signal puzzle_requested
 signal menu_action(action: String)
 signal settings_changed(volume: float, sensitivity: float)
 var root: Control
@@ -15,10 +16,27 @@ var touch_enabled := false
 var hint: Label
 var objective: Label
 var chapter: Label
-var item: Label
+# Items the player carries: artist's drawings in paper slots, top right.
+const ITEMS := {
+	"knife": [preload("res://assets/ui/items/knife.png"), "Нож"],
+	"hairpin": [preload("res://assets/ui/items/hairpin.png"), "Невидимка"],
+	"roof_key": [preload("res://assets/ui/items/roof_key.png"), "Ключ от крыши"]}
+const PAPER := Color("ecd9b8")
+const INK := Color("2b2520")
+const ITEM_SLOT := 60.0
+var inventory_bar: HBoxContainer
+var inventory_slots: Dictionary = {}
+var item_card: Control
+var item_card_panel: PanelContainer
+var item_card_picture: TextureRect
+var item_card_title: Label
+var item_card_caption: Label
+var item_card_tween: Tween
 var crosshair: Label
 var notice: Label
 var dialog: PanelContainer
+var dialog_dim: ColorRect
+var dim_tween: Tween
 var dialog_column: VBoxContainer
 var portrait_stage: Control
 var portrait: TextureRect
@@ -27,10 +45,14 @@ var speaker: Label
 var words: Label
 var choices: VBoxContainer
 var next_button: Button
+var puzzle_button: Button
 var menu: ColorRect
 var menu_column: VBoxContainer
 var menu_scroll:ScrollContainer
 var main_menu_view
+var settings_view
+# Set by the game; the HUD alone (tests) shows only sound and controls.
+var graphics
 var fade: ColorRect
 var flash: ColorRect
 var text_tween: Tween
@@ -95,9 +117,10 @@ func _ready() -> void:
 	chapter = label("", Vector2(24, 20), Vector2(600, 36))
 	chapter.add_theme_color_override("font_color", Color("c9b99e"))
 	build_guide()
-	item = label("", Vector2(-280, 70), Vector2(250, 60))
-	item.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	item.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	inventory_bar = HBoxContainer.new()
+	inventory_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	inventory_bar.add_theme_constant_override("separation", 8)
+	root.add_child(inventory_bar)
 	crosshair = label("·", Vector2(-6, -20), Vector2(12, 24))
 	crosshair.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	crosshair.offset_left = -6
@@ -179,6 +202,9 @@ func _ready() -> void:
 	choices.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	choices.add_theme_constant_override("separation", 8)
 	choice_scroll.add_child(choices)
+	puzzle_button = make_button("Собрать фотографию", func(): puzzle_requested.emit())
+	puzzle_button.hide()
+	dialog_column.add_child(puzzle_button)
 	next_button = make_button("Продолжить", advance)
 	dialog_column.add_child(next_button)
 	# Clip the legs behind the dialogue, including beyond its side margins.
@@ -187,6 +213,14 @@ func _ready() -> void:
 	portrait_stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(portrait_stage)
 	root.move_child(portrait_stage, dialog.get_index())
+	dialog_dim = ColorRect.new()
+	dialog_dim.color = Color(0, 0, 0, 0.45)
+	dialog_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dialog_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dialog_dim.modulate.a = 0
+	dialog_dim.hide()
+	root.add_child(dialog_dim)
+	root.move_child(dialog_dim, portrait_stage.get_index())
 	portrait = TextureRect.new()
 	portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -204,6 +238,7 @@ func _ready() -> void:
 	silhouette.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(silhouette)
 	silhouette.hide()
+	build_item_card()
 	menu = ColorRect.new()
 	menu.color = Color(0.025, 0.025, 0.04, 0.94)
 	menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -222,6 +257,14 @@ func _ready() -> void:
 	menu_column.custom_minimum_size.x = 380
 	menu_column.add_theme_constant_override("separation", 13)
 	center.add_child(menu_column)
+	settings_view = preload("res://scripts/settings_menu.gd").new()
+	add_child(settings_view)
+	settings_view.setup(self)
+	# Touch does not emulate the mouse here, so the menu scrolls from drags itself.
+	menu_scroll.gui_input.connect(func(event: InputEvent):
+		if event is InputEventScreenDrag:
+			menu_scroll.scroll_vertical -= int(event.relative.y)
+			menu_scroll.accept_event())
 	fade = ColorRect.new()
 	fade.color = Color.BLACK
 	fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -278,10 +321,8 @@ func layout_dialog() -> void:
 	notice.offset_right = hint_width / 2
 	notice.offset_top = 100 if root.size.y >= 600 else 65
 	notice.offset_bottom = minf(root.size.y / 2 - 16, notice.offset_top + 86)
-	item.offset_left = -minf(280, root.size.x - 24)
-	item.offset_right = -24
-	item.offset_top = 80
-	item.offset_bottom = 140
+	layout_inventory()
+	layout_item_card()
 	var width := minf(1000, root.size.x - 40)
 	# Keep the same stage and panel between listening, replying and choices.
 	# Otherwise the sprite changes size whenever the protagonist answers.
@@ -291,8 +332,9 @@ func layout_dialog() -> void:
 	var height := minf(maxf(184, root.size.y * .30), root.size.y - 24)
 	if photo_pair.visible:
 		width = minf(300, root.size.x - 40)
-		height = minf(64, root.size.y - 48)
+		height = minf(138 if puzzle_button.visible else 64, root.size.y - 48)
 	main_menu_view.layout()
+	settings_view.layout()
 	dialog.position = Vector2((root.size.x - width) * 0.5, root.size.y - height - 20)
 	dialog.size = Vector2(width, height)
 	layout_portrait()
@@ -365,6 +407,7 @@ func show_line(who: String, text: String, image: Texture2D, options: Array, mini
 	words.show()
 	dialogue_scroll.visible = not text.is_empty()
 	choices.show()
+	puzzle_button.hide()
 	next_button.text = "Продолжить"
 	speaker.text = who
 	words.text = text
@@ -398,6 +441,7 @@ func show_line(who: String, text: String, image: Texture2D, options: Array, mini
 	photo_pair.hide()
 	show_portrait(image, portrait_mode)
 	dialog.show()
+	set_dim(true)
 	action_button.hide()
 	hint.hide()
 	crosshair.hide()
@@ -460,13 +504,22 @@ func select_choice(index: int) -> void:
 	if dialog.visible and line_ready and index >= 0 and index < current_options.size():
 		choice_selected.emit(index)
 
+func set_dim(on: bool) -> void:
+	if dim_tween: dim_tween.kill()
+	if on: dialog_dim.show()
+	dim_tween = create_tween()
+	dim_tween.tween_property(dialog_dim, "modulate:a", 1.0 if on else 0.0, 0.2)
+	if not on: dim_tween.tween_callback(dialog_dim.hide)
+
 func close_dialog() -> void:
 	voice_stopped.emit()
 	pause_timer.stop()
 	if text_tween: text_tween.kill()
 	dialog.hide()
+	set_dim(false)
 	clear_portrait()
 	photo_pair.hide()
+	puzzle_button.hide()
 	hint.hide()
 	crosshair.show()
 	touch.visible = touch_enabled and not menu.visible
@@ -486,7 +539,7 @@ func set_focus_bounds(bounds: Rect2) -> void:
 		hint.visible=not hint.text.is_empty()
 	else:hint.hide()
 
-func show_photo_pair(before: Texture2D, _after: Texture2D = null) -> void:
+func show_photo_pair(before: Texture2D, _after: Texture2D = null, offer_puzzle: bool = false) -> void:
 	pause_timer.stop()
 	if text_tween: text_tween.kill()
 	line_ready = true
@@ -498,7 +551,8 @@ func show_photo_pair(before: Texture2D, _after: Texture2D = null) -> void:
 	if not dialog.get_theme_stylebox("panel") is StyleBoxEmpty:
 		photo_dialog_style = dialog.get_theme_stylebox("panel")
 	dialog.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
-	next_button.text = "Назад"
+	puzzle_button.visible = offer_puzzle
+	next_button.text = "Не сейчас" if offer_puzzle else "Назад"
 	next_button.disabled = false
 	next_button.show()
 	words.visible_characters = -1
@@ -511,6 +565,11 @@ func show_photo_pair(before: Texture2D, _after: Texture2D = null) -> void:
 		photo_pair.add_child(column)
 		var title := Label.new();title.text=entry[0];title.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
 		column.add_child(title)
+		if offer_puzzle and entry[1] != null:
+			# Torn photo: the finished picture must not leak before it is assembled.
+			var torn := Label.new();torn.text="Фотография разорвана.\nСложи её, чтобы разглядеть.";torn.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER;torn.vertical_alignment=VERTICAL_ALIGNMENT_CENTER
+			torn.size_flags_vertical=Control.SIZE_EXPAND_FILL;column.add_child(torn)
+			continue
 		var picture := TextureRect.new();picture.texture=entry[1];picture.expand_mode=TextureRect.EXPAND_IGNORE_SIZE;picture.stretch_mode=TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		picture.size_flags_vertical=Control.SIZE_EXPAND_FILL;column.add_child(picture)
 		if entry[1] == null:
@@ -527,12 +586,11 @@ func layout_photo_pair() -> void:
 	photo_pair.position = Vector2((root.size.x - width) / 2, 16)
 	photo_pair.size = Vector2(maxf(0, width), height)
 
-func set_objective(area: String, text: String, has_hairpin: bool = false) -> void:
+func set_objective(area: String, text: String) -> void:
 	chapter.text = area
 	# The label swaps to the new text once the old one has faded out.
 	guide_text = text
 	chapter.hide()
-	item.text = "Невидимка" if has_hairpin else ""
 
 func build_guide() -> void:
 	guide = Control.new()
@@ -641,6 +699,137 @@ func draw_guide_arrow() -> void:
 	guide_arrow.draw_colored_polygon(shape, GUIDE_IVORY if guide_aligned else Color(GUIDE_IVORY, 0.82))
 	guide_arrow.draw_polyline(outline, Color(0, 0, 0, 0.45), 1.0, true)
 
+func paper_style(radius: int, margin: float) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = PAPER
+	style.border_color = GUIDE_BRASS
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(radius)
+	style.set_content_margin_all(margin)
+	style.shadow_color = Color(0, 0, 0, 0.45)
+	style.shadow_size = 6
+	return style
+
+# Rebuilds the slots in story order; ids the HUD doesn't know are skipped.
+func set_inventory(ids: PackedStringArray) -> void:
+	if PackedStringArray(inventory_slots.keys()) == ids: return
+	for slot in inventory_slots.values():
+		inventory_bar.remove_child(slot); slot.queue_free()
+	inventory_slots.clear()
+	for id in ids:
+		if not ITEMS.has(id): continue
+		var slot := PanelContainer.new()
+		slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		slot.custom_minimum_size = Vector2(ITEM_SLOT, ITEM_SLOT)
+		slot.add_theme_stylebox_override("panel", paper_style(8, 5))
+		var picture := TextureRect.new()
+		picture.texture = ITEMS[id][0]
+		picture.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		slot.add_child(picture)
+		inventory_bar.add_child(slot)
+		inventory_slots[id] = slot
+	layout_inventory()
+
+func layout_inventory() -> void:
+	# Right-aligned under the pause button.
+	var width := inventory_slots.size() * ITEM_SLOT + maxf(0, inventory_slots.size() - 1) * 8
+	inventory_bar.size = Vector2(width, ITEM_SLOT)
+	inventory_bar.position = Vector2(root.size.x - 24 - width, 80)
+
+func build_item_card() -> void:
+	item_card = Control.new()
+	item_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	item_card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.add_child(item_card)
+	item_card_panel = PanelContainer.new()
+	item_card_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	item_card_panel.add_theme_stylebox_override("panel", paper_style(12, 18))
+	item_card.add_child(item_card_panel)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 4)
+	item_card_panel.add_child(column)
+	item_card_picture = TextureRect.new()
+	item_card_picture.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	item_card_picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	item_card_picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	item_card_picture.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(item_card_picture)
+	item_card_title = Label.new()
+	item_card_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	item_card_title.add_theme_color_override("font_color", INK)
+	item_card_title.add_theme_font_size_override("font_size", 21)
+	column.add_child(item_card_title)
+	item_card_caption = Label.new()
+	item_card_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	item_card_caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	item_card_caption.add_theme_color_override("font_color", Color("6b5440"))
+	item_card_caption.add_theme_font_size_override("font_size", 15)
+	column.add_child(item_card_caption)
+	item_card.hide()
+
+func layout_item_card() -> void:
+	if not is_instance_valid(item_card_panel): return
+	# A small paper card high on the screen, clear of the crosshair and the
+	# objective; the world stays visible and playable around it.
+	var side := clampf(minf(root.size.x, root.size.y) * .2, 120, 190)
+	var height := side + (78 if item_card_caption.visible else 44)
+	item_card_panel.size = Vector2(side, height)
+	item_card_panel.position = Vector2((root.size.x - side) / 2, maxf(16, root.size.y * .1))
+	item_card_panel.pivot_offset = item_card_panel.size / 2
+
+# The drawing pops up when the player gets an item, then flies into its slot.
+# Any click, tap or key sends it there at once.
+var item_card_id := ""
+func show_item_card(id: String, caption: String = "") -> void:
+	if not ITEMS.has(id): return
+	if item_card_tween: item_card_tween.kill()
+	item_card_id = id
+	item_card_picture.texture = ITEMS[id][0]
+	item_card_title.text = ITEMS[id][1]
+	item_card_caption.text = caption
+	item_card_caption.visible = not caption.is_empty()
+	layout_item_card()
+	item_card.modulate.a = 0
+	item_card_panel.scale = Vector2(0.86, 0.86)
+	item_card.show()
+	item_card_tween = create_tween()
+	item_card_tween.tween_property(item_card, "modulate:a", 1.0, 0.2)
+	item_card_tween.parallel().tween_property(item_card_panel, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	item_card_tween.tween_interval(1.4 if caption.is_empty() else 2.0)
+	item_card_tween.tween_callback(stow_item_card)
+
+func stow_item_card() -> void:
+	if not item_card.visible or item_card_id.is_empty(): return
+	if item_card_tween: item_card_tween.kill()
+	var id := item_card_id
+	item_card_id = ""
+	var slot: Control = inventory_slots.get(id)
+	item_card_tween = create_tween().set_parallel(true)
+	if is_instance_valid(slot) and slot.is_visible_in_tree():
+		var target: Vector2 = slot.get_global_rect().get_center() - item_card_panel.size / 2
+		var shrink: float = slot.size.x / item_card_panel.size.x
+		item_card_tween.tween_property(item_card_panel, "position", target, 0.32).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		item_card_tween.tween_property(item_card_panel, "scale", Vector2.ONE * shrink, 0.32).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	item_card_tween.tween_property(item_card, "modulate:a", 0.0, 0.32).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	item_card_tween.chain().tween_callback(func():
+		item_card.hide()
+		pulse_slot(id))
+
+func _input(event: InputEvent) -> void:
+	if not is_instance_valid(item_card) or not item_card.visible or item_card_id.is_empty(): return
+	if (event is InputEventMouseButton or event is InputEventScreenTouch or event is InputEventKey or event is InputEventJoypadButton) and event.is_pressed():
+		stow_item_card()
+
+func pulse_slot(id: String) -> void:
+	var slot: Control = inventory_slots.get(id)
+	if not is_instance_valid(slot): return
+	slot.pivot_offset = slot.size / 2
+	var tween := create_tween()
+	tween.tween_property(slot, "scale", Vector2(1.25, 1.25), 0.15)
+	tween.tween_property(slot, "scale", Vector2.ONE, 0.25)
+
 func show_notice(text: String) -> void:
 	if notice_tween: notice_tween.kill()
 	notice.text = text
@@ -651,6 +840,7 @@ func show_notice(text: String) -> void:
 
 func show_menu(kind: String, can_continue: bool = false) -> void:
 	menu_scroll.scroll_vertical=0
+	settings_view.active = false
 	for child in menu_column.get_children():
 		menu_column.remove_child(child)
 		child.queue_free()
@@ -693,6 +883,7 @@ func show_menu(kind: String, can_continue: bool = false) -> void:
 	crosshair.hide()
 
 func show_endings(found:Array,definitions:Dictionary) -> void:
+	settings_view.active = false
 	main_menu_view.configure(false, menu_column, menu_scroll)
 	menu.color = Color(0.025, 0.025, 0.04, .94)
 	for child in menu_column.get_children():menu_column.remove_child(child);child.queue_free()
@@ -707,6 +898,7 @@ func show_endings(found:Array,definitions:Dictionary) -> void:
 
 func hide_menu() -> void:
 	menu.hide()
+	settings_view.active = false
 	if not dialog.visible:
 		touch.visible = touch_enabled
 		hint.hide()
@@ -715,25 +907,11 @@ func hide_menu() -> void:
 func show_settings() -> void:
 	main_menu_view.configure(false, menu_column, menu_scroll)
 	menu.color = Color(0.025, 0.025, 0.04, .94)
+	menu_scroll.scroll_vertical = 0
 	for child in menu_column.get_children():
 		menu_column.remove_child(child)
 		child.queue_free()
-	for name in ["Громкость", "Чувствительность обзора"]:
-		var caption := Label.new()
-		caption.text = name
-		menu_column.add_child(caption)
-		var slider := HSlider.new()
-		slider.min_value = 0 if name == "Громкость" else 0.4
-		slider.max_value = 1 if name == "Громкость" else 2.5
-		slider.step = 0.05
-		slider.value = volume if name == "Громкость" else sensitivity
-		slider.custom_minimum_size.y = 48
-		slider.value_changed.connect(func(value):
-			if name == "Громкость": volume = value
-			else: sensitivity = value
-			settings_changed.emit(volume, sensitivity))
-		menu_column.add_child(slider)
-	menu_column.add_child(make_button("Назад", func(): menu_action.emit("settings_back")))
+	settings_view.build(menu_column)
 
 func transition_out() -> void:
 	fade.modulate.a = 0
@@ -758,8 +936,6 @@ func set_story_mode(mode: String) -> void:
 	story_backdrop.visible = not mode.is_empty()
 	story_backdrop.color = Color(0.012, 0.014, 0.021) if mode == "technical" else Color(0.82, 0.83, 0.80)
 	chapter.add_theme_color_override("font_color", Color("564536") if mode == "photos" else Color("c9b99e"))
-	for element in [item]:
-		element.add_theme_color_override("font_color", Color("23242a") if mode == "photos" else Color.WHITE)
 	story_caption.text = ""
 	silhouette.hide()
 	if silhouette_tween: silhouette_tween.kill()
@@ -781,6 +957,8 @@ func reset_effects() -> void:
 	if scare_tween: scare_tween.kill()
 	if silhouette_tween: silhouette_tween.kill()
 	if notice_tween: notice_tween.kill()
+	if item_card_tween: item_card_tween.kill()
+	item_card.hide()
 	flash.color.a = 0
 	silhouette.hide()
 	notice.text = ""

@@ -14,13 +14,14 @@ var view_tween: Tween
 var view_active := false
 var neutral_pitch := 0.0
 var neutral_yaw := 0.0
-## This is the breach already cut through the delivered canopy and maintenance
-## walk. Keep the opening animation and falling pieces registered to this bay.
-const ROOF_BREACH_CENTER := Vector3(-8, 50, -6)
-const ROOF_BREACH_X_RANGE := Vector2(-11, -5)
-const ROOF_BREACH_Z_RANGE := Vector2(-9, -3)
+## The single opening in the canopy, straight above the trampoline on the east
+## roof deck (canopy_damage_finish cuts it). The opening animation, the falling
+## pieces and Richard's final bounce all use this bay.
+const ROOF_BREACH_CENTER := Vector3(5.3, 50.6, -2)
+const ROOF_BREACH_X_RANGE := Vector2(3.3, 7.3)
+const ROOF_BREACH_Z_RANGE := Vector2(-4, 0)
 # Bias the short look slightly toward the unobstructed side of the same cut.
-const ROOF_LOOK_TARGET := Vector3(-7.2, 50, -6)
+const ROOF_LOOK_TARGET := Vector3(5.6, 50.6, -2)
 var gallery_count:=0
 var ring_mesh:MeshInstance3D
 func material(color: String) -> StandardMaterial3D:

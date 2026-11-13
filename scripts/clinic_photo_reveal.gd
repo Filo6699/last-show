@@ -1,7 +1,11 @@
 extends Node3D
 ## Physical closed photo on the clinic wall. The still is rendered from the
 ## existing civilian Richard GLB, so the reveal cannot invent another face.
-const PANEL_AT := Vector3(2.18, 0.0, 0.14)
+# Wall-local row (wall node at x=-16.75 faces -X; inner wall face is local z=-0.075).
+const CARD_SIZE := Vector3(0.80, 1.08, 0.05)
+const CARD_Z := -0.05
+const ROW_X := [-1.95, -0.65, 0.65, 1.95]
+const PANEL_AT := Vector3(1.95, 0.0, CARD_Z)
 const REVEALED_FLAG := "richard_photo_revealed"
 const FALLEN_FLAG := "richard_photo_fallen"
 const PENDING_FLAG := "photo_reveal_pending"
@@ -13,6 +17,7 @@ var photo_card: Node3D
 var paper_cover: Node3D
 var caption: Label3D
 var target: StaticBody3D
+var puzzle_target: StaticBody3D
 var transition: Tween
 var floor_card_y := 0.0
 var revealed := false
@@ -167,6 +172,7 @@ func _set_dropped_state(end_transform: Transform3D) -> void:
 	fallen = true
 	held = false
 	target.collision_layer = 0
+	puzzle_target.collision_layer = 16
 	game.flags[REVEALED_FLAG] = true
 	game.flags[FALLEN_FLAG] = true
 	game.flags[LANDING_FLAG] = _transform_to_array(end_transform)
@@ -186,10 +192,11 @@ func sync() -> void:
 	revealed = saved_reveal or saved_fall
 	fallen = saved_fall
 	target.collision_layer = 0 if fallen else 16
+	puzzle_target.collision_layer = 16 if fallen else 0
 	if is_instance_valid(transition): transition.kill()
 	held = false
-	photo_card.position = PANEL_AT
 	photo_card.top_level = false
+	photo_card.position = PANEL_AT
 	photo_card.rotation = Vector3.ZERO
 	caption.visible = revealed
 	paper_cover.visible = true
@@ -221,8 +228,9 @@ func reset() -> void:
 		game.flags.erase(LANDING_FLAG)
 	if _ready_setup:
 		target.collision_layer = 16
-		photo_card.position = PANEL_AT
+		puzzle_target.collision_layer = 0
 		photo_card.top_level = false
+		photo_card.position = PANEL_AT
 		photo_card.rotation = Vector3.ZERO
 		paper_cover.position = PANEL_AT
 		paper_cover.rotation = Vector3.ZERO
@@ -251,24 +259,15 @@ func _build_card() -> void:
 	add_child(photo_card)
 	var backing := MeshInstance3D.new()
 	var board := BoxMesh.new()
-	board.size = Vector3(0.80, 1.08, 0.05)
+	board.size = CARD_SIZE
 	backing.mesh = board
 	backing.material_override = _mat(Color("392c27"), 0.86)
 	photo_card.add_child(backing)
-	var print := MeshInstance3D.new()
-	var quad := QuadMesh.new()
-	quad.size = Vector2(0.72, 0.89)
-	print.mesh = quad
-	var print_material := StandardMaterial3D.new()
-	print_material.albedo_texture = load("res://assets/story/photos/richard_child_portrait.png")
-	print_material.albedo_color = Color("e8ddc4")
-	print_material.roughness = 0.96
-	print.material_override = print_material
-	print.position.z = 0.029
-	photo_card.add_child(print)
+	# Torn, worn pieces under glass; the glass and pieces fall with the card.
+	game.photo_puzzle.build_wall("child", photo_card, Vector3(0, 0, 0.029), Vector2(0.72, 0.89), Color("e8ddc4"))
 	caption = Label3D.new()
 	caption.name = "ChildCaption"
-	caption.text = "РЕБЁНОК"
+	caption.text = "РИЧАРД"
 	caption.font_size = 28
 	caption.pixel_size = 0.0035
 	caption.modulate = Color("e4d6bf")
@@ -329,6 +328,21 @@ func _build_target() -> void:
 	target.add_child(collision)
 	target.interacted.connect(game.on_interact)
 	game.targets["photo_child"] = [target]
+	# Once the card has fallen it is inspected on the floor; only then the puzzle is offered.
+	puzzle_target = StaticBody3D.new()
+	puzzle_target.name = "RichardChildPuzzleInteractable"
+	puzzle_target.set_script(preload("res://scripts/interactable.gd"))
+	puzzle_target.interaction_id = &"photo_child_puzzle"
+	puzzle_target.collision_layer = 0
+	puzzle_target.prompt = "Рассмотреть фотографию"
+	photo_card.add_child(puzzle_target)
+	var puzzle_collision := CollisionShape3D.new()
+	var puzzle_shape := BoxShape3D.new()
+	puzzle_shape.size = Vector3(0.9, 1.1, 0.2)
+	puzzle_collision.shape = puzzle_shape
+	puzzle_target.add_child(puzzle_collision)
+	puzzle_target.interacted.connect(game.on_interact)
+	game.targets["photo_child_puzzle"] = [puzzle_target]
 
 func _mat(color: Color, roughness: float) -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()

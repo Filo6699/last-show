@@ -21,6 +21,12 @@ var dialogue_portrait := ""
 var scene_timer: Timer
 var mirror_gaze_time := 0.0
 var clinic_photo: Node3D
+var photo_puzzle: CanvasLayer
+var lockpick: CanvasLayer
+var opening: CanvasLayer
+# Tests that drive the story from the first line turn the cutscene off.
+var opening_enabled := true
+var screamer: CanvasLayer
 var photo_comparison := ""
 var actors: Dictionary = {}
 var targets: Dictionary = {}
@@ -37,9 +43,12 @@ var camera_tween: Tween
 var mirror_system: Node3D
 var location: Node3D
 var full_game: Node3D
+var dark_walk: Node
+var tightrope: CanvasLayer
 var glimpse_node: Node3D
 var glimpse_tween: Tween
 var elsa_rope: MeshInstance3D
+var graphics: Node
 var last_safe_position := Vector3(-3, .05, 3)
 
 func _ready() -> void:
@@ -51,9 +60,6 @@ func _ready() -> void:
 	add_child(scene_timer)
 	AudioServer.set_bus_mute(0, not AUDIO_ENABLED)
 	configure_input()
-	if OS.has_feature("mobile"):
-		get_window().size_changed.connect(configure_render_budget)
-		configure_render_budget()
 	var doctor := StaticBody3D.new()
 	doctor.name = "Walter"
 	doctor.set_script(INTERACTABLE)
@@ -70,6 +76,19 @@ func _ready() -> void:
 		actor.interacted.connect(on_interact)
 
 	stage_existing_props()
+	photo_puzzle = preload("res://scripts/photo_puzzle.gd").new()
+	photo_puzzle.game = self
+	add_child(photo_puzzle)
+	photo_puzzle.closed.connect(on_puzzle_closed)
+	screamer = preload("res://scripts/screamer.gd").new()
+	add_child(screamer)
+	opening = preload("res://scripts/opening_cutscene.gd").new()
+	add_child(opening)
+	opening.setup(self)
+	lockpick = preload("res://scripts/lockpick.gd").new()
+	lockpick.game = self
+	add_child(lockpick)
+	lockpick.closed.connect(on_lockpick_closed)
 	location = Node3D.new()
 	location.set_script(preload("res://scripts/location.gd"))
 	world.add_child(location)
@@ -81,13 +100,26 @@ func _ready() -> void:
 	mirror_system.setup(self)
 	full_game=preload("res://scripts/full_game.gd").new()
 	world.add_child(full_game);full_game.setup(self)
+	dark_walk = preload("res://scripts/dark_walk.gd").new()
+	add_child(dark_walk);dark_walk.setup(self)
+	var grime := preload("res://scripts/grime.gd").new()
+	world.add_child(grime);grime.setup(self)
+	tightrope = preload("res://scripts/tightrope.gd").new()
+	add_child(tightrope);tightrope.setup(self)
 	clinic_photo = preload("res://scripts/clinic_photo_reveal.gd").new()
 	clinic_photo.setup(self)
 	var outline := preload("res://scripts/focus_outline.gd").new()
 	add_child(outline);outline.setup(self)
+	graphics = preload("res://scripts/graphics_settings.gd").new()
+	add_child(graphics);graphics.setup(self)
+	graphics.changed.connect(save_settings)
+	hud.graphics = graphics
+	var culling := preload("res://scripts/render_culling.gd").new()
+	add_child(culling);culling.setup(self)
 	hud.interaction_requested.connect(player.interact)
 	hud.advance_requested.connect(advance_dialogue)
 	hud.choice_selected.connect(select_choice)
+	hud.puzzle_requested.connect(start_photo_puzzle)
 	hud.menu_action.connect(on_menu_action)
 	hud.settings_changed.connect(apply_settings)
 	player.focus_changed.connect(hud.set_hint)
@@ -102,10 +134,9 @@ func _ready() -> void:
 	hud.show_menu("main", read_save().size() > 0)
 
 func configure_render_budget() -> void:
-	# Limit only 3D pixel work on high-DPI phones; dialogue and touch UI stay native.
-	var pixels := Vector2(get_window().size)
-	get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
-	get_viewport().scaling_3d_scale = minf(1.0, minf(1280.0 / maxf(1.0, pixels.x), 720.0 / maxf(1.0, pixels.y)))
+	# Phones already do this; benchmarks call it to measure the same 3D budget.
+	graphics.limit_budget = true
+	graphics.apply_scale()
 
 func configure_input() -> void:
 	var bindings := {"move_forward": [KEY_W, KEY_UP], "move_back": [KEY_S, KEY_DOWN],
@@ -187,6 +218,18 @@ func new_game() -> void:
 	menu_kind = ""
 	place_player(Vector3(0, .36, -5.8), Vector3(0, 1.35, 6.6))
 	update_staging()
+	play_opening()
+
+func play_opening() -> void:
+	if not opening_enabled:
+		start_dialogue("intro")
+		return
+	transitioning = true
+	var token := session
+	opening.play()
+	await opening.finished
+	if token != session: return
+	transitioning = false
 	start_dialogue("intro")
 
 func place_player(position: Vector3, facing: Vector3) -> void:
@@ -226,19 +269,26 @@ func on_interact(id: StringName) -> void:
 			pass
 		"technical":
 			if phase in ["elsa_hall","to_technical","return_arena","roof_access"] and not flags.get("service_open",false):
-				var needs_pick: bool = phase in ["return_arena", "roof_access"]
-				if needs_pick and not flags.get("hairpin",false):
-					hud.show_notice("Дверь заперта.");return
-				flags["service_open"] = true
-				location.sync()
-				sound("unlock" if needs_pick else "service_open")
-				save_game()
+				# On the way to Walter the door is simply open. After Richard
+				# refuses the contract Walter locks him in, and only Elsa's
+				# hairpin gets him out (without it the story ends in the clinic).
+				if phase in ["elsa_hall","to_technical"]:
+					flags["service_open"] = true
+					location.sync()
+					sound("service_open")
+					save_game()
+				elif not flags.get("hairpin",false):
+					sound("locked")
+					hud.show_notice("Дверь заперта снаружи.")
+				else:
+					start_lockpick("service", 5)
 			elif not flags.get("service_open",false):
 				sound("locked")
 				hud.show_notice("Замок закрыт. Нужен способ открыть его.")
 		"photos": enter_photo_inspection()
 		"photo_bruno", "photo_elsa", "photo_lili": inspect_photo(String(id).trim_prefix("photo_"))
 		"photo_child": clinic_photo.interact()
+		"photo_child_puzzle": inspect_photo("child")
 		"walter":
 			if phase == "photos": begin_walter_talk()
 			elif phase == "contract": start_dialogue("walter_contract")
@@ -270,8 +320,51 @@ func inspect_photo(id: String) -> void:
 	photo_comparison = id
 	player.set_locked(true)
 	hud.show_line("", "", null, [])
-	hud.show_photo_pair(database.get_photo(id, true))
+	hud.show_photo_pair(photo_puzzle.photo_texture(id), null, not photo_puzzle.is_done(id) and photo_puzzle.walls.has(id))
 	flags["photo_seen_" + id] = true
+	save_game()
+
+# Optional: lifts the glass over the torn photo, then opens the reassembly board.
+func start_photo_puzzle() -> void:
+	var id := photo_comparison
+	if id.is_empty() or phase != "photos" or not photo_puzzle.walls.has(id) or photo_puzzle.active != "": return
+	photo_comparison = ""
+	hud.close_dialog()
+	hud.touch.hide()
+	hud.crosshair.hide()
+	player.set_locked(true)
+	photo_puzzle.remove_glass(id)
+	var token := int(session)
+	await get_tree().create_timer(.65).timeout
+	if token != int(session) or phase != "photos": return
+	photo_puzzle.open(id)
+
+func start_lockpick(id: String, pins: int) -> void:
+	if lockpick.is_open(): return
+	player.set_locked(true)
+	hud.touch.hide()
+	hud.crosshair.hide()
+	hud.hint.hide()
+	lockpick.open(id, pins)
+
+func on_lockpick_closed(id: String, solved: bool) -> void:
+	player.set_locked(hud.menu.visible or not sequence_id.is_empty() or transitioning)
+	hud.touch.visible = hud.touch_enabled and not hud.menu.visible and not hud.dialog.visible
+	hud.crosshair.show()
+	if not solved: return
+	match id:
+		"service":
+			flags["service_open"] = true
+			location.sync()
+			sound("unlock")
+			update_staging()
+			save_game()
+		"roof":
+			full_game.open_roof_door()
+
+func on_puzzle_closed(id: String, solved: bool) -> void:
+	if phase == "photos": player.set_locked(false)
+	hud.close_dialog()
 	save_game()
 
 func check_walk_progress() -> void:
@@ -516,7 +609,9 @@ func update_staging() -> void:
 	actors["mordecai"].prompt = "Обсудить крышу с Мордекаем" if phase == "bruno" else "Поговорить с Мордекаем"
 	actors["bruno"].prompt = "Обсудить крышу с Бруно" if phase == "bruno" else "Поговорить с Бруно"
 	actors["bruno"].position = layout.BRUNO
-	location.move_actor("elsa", layout.ELSA_HALL if phase in ["lili", "bruno", "elsa_hall", "to_technical"] else layout.ELSA_DRESSING + Vector3(0,0 if phase in ["elsa_dressing", "to_hall"] else 2.2,0), 2.0)
+	# Elsa hangs in the dressing room and stays there: before her scene she is
+	# up in the rigging, afterwards the player comes back to her for the pin.
+	location.move_actor("elsa", layout.ELSA_DRESSING + Vector3(0, 2.2 if phase in ["intro", "news", "to_dressing", "mirror"] else 0.0, 0), 2.0)
 	var doctor_position: Array = flags.get("walter_position", [layout.WALTER_WAIT.x, layout.WALTER_WAIT.y, layout.WALTER_WAIT.z])
 	actors["walter"].position = Vector3(doctor_position[0], doctor_position[1], doctor_position[2])
 	# After the news talk he keeps whatever way he was facing (no snap turn).
@@ -531,10 +626,11 @@ func update_staging() -> void:
 	if phase == "lili" and flags.get("lili_visible", false) and not flags.get("lili_reveal_pending", false):
 		actors["lili"].position = layout.LILI
 		actors["lili"].look_at(Vector3(player.position.x, actors["lili"].position.y, player.position.z), Vector3.UP, true)
-	actors["elsa"].rotation.y = 1.8 if phase in ["lili","bruno","elsa_hall","to_technical"] else PI
+	actors["elsa"].rotation.y = PI
 	actors["walter"].rotation.y = float(flags.get("walter_yaw", PI))
 	if is_instance_valid(location): location.sync()
 	if is_instance_valid(clinic_photo): clinic_photo.sync()
+	if is_instance_valid(photo_puzzle): photo_puzzle.sync()
 	var notes := {
 		"intro": ["ПОСЛЕДНЕЕ ПРЕДСТАВЛЕНИЕ", "Закончить представление"],
 		"news": ["ЗА КУЛИСАМИ", "Поговорить с Мордекаем"],
@@ -544,14 +640,14 @@ func update_staging() -> void:
 		"to_hall": ["ГРИМЁРНАЯ", "Вернуться на манеж"],
 		"lili": ["МАНЕЖ", "Подойти к сундуку"],
 		"bruno": ["МАНЕЖ", "Спросить Мордекая о крыше"],
-		"elsa_hall": ["МАНЕЖ", "Найти Эльзу за кулисами"],
+		"elsa_hall": ["ГРИМЁРНАЯ", "Найти Эльзу в гримёрной"],
 		"to_technical": ["МАНЕЖ", "Найти доктора Вальтера"],
 		"technical": ["СЛУЖЕБНЫЙ КОРИДОР", "Найти доктора Вальтера"],
 		"photos": ["КАБИНЕТ", "Поговорить с Вальтером"],
 		"walter": ["КАБИНЕТ", "Поговорить с Вальтером"],
 		"complete": ["КОНЕЦ ГЛАВЫ", ""]}
 	var info: Array = notes.get(phase,full_game.objective(phase) if is_instance_valid(full_game) else ["LAST SHOW",""])
-	hud.set_objective(info[0], info[1], flags.get("hairpin", false))
+	hud.set_objective(info[0], info[1])
 	if is_instance_valid(full_game):full_game.sync()
 
 # Point of the current objective (an NPC, door or object), or null.
@@ -632,11 +728,29 @@ func guide_route(p: Vector3, goal: Vector3) -> Vector3:
 		if Vector2(point.x - p.x, point.z - p.z).length() > 1.4: return point
 	return goal
 
+# The arrow is a rescue, not a route: it appears only after the player has
+# roamed for STUCK_SECONDS without any story progress (new phase or flag).
+const STUCK_SECONDS := 120.0
+var stuck_time := 0.0
+var stuck_marker := ""
+
+func progress_marker() -> String:
+	return phase + ":" + str(flags.size())
+
 func update_guide() -> void:
 	var active: bool = not player.locked and not transitioning and sequence_id.is_empty() and photo_comparison.is_empty() and not hud.menu.visible
-	var goal = objective_goal() if active else null
+	var marker := progress_marker()
+	if marker != stuck_marker:
+		stuck_marker = marker
+		stuck_time = 0.0
+	elif active:
+		stuck_time += get_process_delta_time()
+	# The objective line and the arrow both stay hidden until the player has
+	# made no progress for STUCK_SECONDS.
+	var stuck := stuck_time >= STUCK_SECONDS
+	var goal = objective_goal() if active and stuck else null
 	if goal == null:
-		hud.set_guide(active)
+		hud.set_guide(active and stuck)
 		return
 	var waypoint: Vector3 = guide_route(player.global_position, goal)
 	var to: Vector3 = waypoint - player.global_position
@@ -647,7 +761,7 @@ func update_guide() -> void:
 		forward = -player.global_basis.z
 		forward.y = 0
 	if to.length() < 1.2 or forward.length_squared() < .0001:
-		hud.set_guide(active)
+		hud.set_guide(active and stuck)
 		return
 	# Positive signed angles turn left around UP; the arrow turns clockwise.
 	hud.set_guide(active, -forward.normalized().signed_angle_to(to.normalized(), Vector3.UP), true)
@@ -686,15 +800,20 @@ func run_event(event: String) -> void:
 			var away := layout.LILI + Vector3(-4.5, 0, -3)
 			lili.look_at(Vector3(away.x, lili.position.y, away.z), Vector3.UP, true)
 			if actor_tween: actor_tween.kill()
+			# She runs off with her run cycle instead of sliding in her idle pose.
+			play_clip(lili, "walk")
 			actor_tween = create_tween()
 			actor_tween.tween_property(lili, "position", away, 1.1)
-			actor_tween.tween_callback(lili.hide)
+			actor_tween.tween_callback(func():
+				lili.hide()
+				play_clip(lili, "idle"))
 			var nameplate: MeshInstance3D = model.find_child("Trunk name", true, false)
 			if nameplate:
 				frame_player_at(nameplate.to_global(nameplate.get_aabb().get_center()), .5)
 		"hairpin_received":
 			flags["hairpin"] = true
 			sound("hairpin")
+			hud.show_item_card("hairpin")
 			update_staging()
 		"technical_begin": audio.flicker()
 		"knock_front": sound("knock_front")
@@ -724,6 +843,15 @@ func run_event(event: String) -> void:
 			update_staging()
 			hud.show_caption("")
 
+
+# Plays a named clip on an actor's model if it has one; returns whether it did.
+func play_clip(actor: Node, clip: String) -> bool:
+	for animator in actor.find_children("*", "AnimationPlayer", true, false):
+		if animator.has_animation(clip):
+			animator.active = true
+			animator.play(clip, .15)
+			return true
+	return false
 
 func shake_camera(strength: float) -> void:
 	var initial: Vector3 = player.camera.position
@@ -858,6 +986,9 @@ func load_game() -> void:
 			full_game.restore_ending(ending)
 		menu_kind = "end"
 		hud.show_menu("end")
+	elif phase == "intro" and sequence_id.is_empty():
+		place_player(Vector3(0, .36, -5.8), Vector3(0, 1.35, 6.6))
+		play_opening()
 	elif phase == "lili" and sequence_id.is_empty():
 		begin_lili_reveal()
 	elif phase == "walter" and sequence_id.is_empty():
@@ -879,16 +1010,29 @@ func load_settings() -> void:
 	if not values is Dictionary: values = {}
 	hud.volume = clampf(float(values.get("volume", 0.65)), 0, 1)
 	hud.sensitivity = clampf(float(values.get("sensitivity", 1)), 0.4, 2.5)
+	var picture = values.get("graphics", {})
+	graphics.load_dict(picture if picture is Dictionary else {})
 	apply_settings(hud.volume, hud.sensitivity)
 
 func apply_settings(volume: float, sensitivity: float) -> void:
+	hud.volume = volume
+	hud.sensitivity = sensitivity
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(volume, 0.0001)))
 	player.mouse_sensitivity = 0.0025 * sensitivity
+	save_settings()
+
+func save_settings() -> void:
 	var file := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
-	if file: file.store_string(JSON.stringify({"volume": volume, "sensitivity": sensitivity}))
+	if file: file.store_string(JSON.stringify({"volume": hud.volume, "sensitivity": hud.sensitivity, "graphics": graphics.to_dict()}))
 
 func stop_effects() -> void:
 	photo_comparison = ""
+	if is_instance_valid(photo_puzzle) and photo_puzzle.active != "":
+		photo_puzzle.close(false)
+	if is_instance_valid(lockpick) and lockpick.is_open():
+		lockpick.close(false)
+	if is_instance_valid(opening) and opening.playing: opening.stop()
+	if is_instance_valid(screamer): screamer.stop()
 	scene_timer.stop()
 	scene_timer.paused = false
 	mirror_gaze_time = 0
@@ -899,6 +1043,8 @@ func stop_effects() -> void:
 	glimpse_node = null
 	if is_instance_valid(location): location.reset_motion()
 	if is_instance_valid(full_game):full_game.reset_motion()
+	if is_instance_valid(dark_walk): dark_walk.reset()
+	if is_instance_valid(tightrope): tightrope.reset()
 	if is_instance_valid(mirror_system): mirror_system.end_scene()
 	if actor_tween: actor_tween.kill()
 	if camera_tween: camera_tween.kill()
@@ -926,6 +1072,9 @@ func frame_player_at(point: Vector3, duration: float) -> void:
 	camera_tween.tween_property(player, "rotation:y", yaw, duration)
 	camera_tween.tween_property(player.camera, "rotation", Vector3(pitch, 0, 0), duration)
 
+# Lili's origin sits 1.2 m above her feet; this puts her feet on the trunk floor.
+const LILI_IN_TRUNK_Y := 1.35
+
 func begin_lili_reveal() -> void:
 	if transitioning: return
 	phase = "lili"
@@ -951,12 +1100,14 @@ func begin_lili_reveal() -> void:
 		if session != reveal_session: return
 		flags["lili_visible"] = true
 		var actor: Node3D = actors["lili"]
-		actor.position = layout.TRUNK+Vector3(-.7,-.2,.8)
+		# She crouches inside the trunk; the lid bursts open and she leaps out.
+		actor.position = Vector3(layout.TRUNK.x, LILI_IN_TRUNK_Y, layout.TRUNK.z)
 		actor.visible = true
 		actor.collision_layer = 0
 		actor.look_at(Vector3(player.position.x, actor.position.y, player.position.z), Vector3.UP, true)
+		full_game.set_dressing.set_trunk_open(true, true)
 		sound("box_second"))
-	actor_tween.tween_property(actors["lili"], "position", layout.TRUNK+Vector3(-.7,1.65,.8), .35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	actor_tween.tween_property(actors["lili"], "position", Vector3(layout.TRUNK.x, LILI_IN_TRUNK_Y + 1.75, layout.TRUNK.z), .35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	actor_tween.tween_property(actors["lili"], "position", layout.LILI, .4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	actor_tween.tween_interval(.45)
 	actor_tween.tween_callback(func():
@@ -1057,7 +1208,13 @@ func show_lili_glimpse() -> void:
 	player.set_locked(true)
 	hud.touch.hide()
 	glimpse_tween = create_tween()
-	glimpse_tween.tween_interval(.85)
+	# A third of a second to recognise her, then the face is in yours.
+	glimpse_tween.tween_interval(.35)
+	glimpse_tween.tween_callback(func():
+		if session != glimpse_session: return
+		screamer.play()
+		shake_camera(.06))
+	glimpse_tween.tween_interval(.75)
 	glimpse_tween.tween_callback(func():
 		if session != glimpse_session: return
 		if is_instance_valid(glimpse_node): glimpse_node.queue_free()

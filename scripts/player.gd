@@ -10,6 +10,8 @@ var focus: Object
 var touch_mode: bool = false
 var focus_query := PhysicsRayQueryParameters3D.new()
 var last_focus_prompt := ""
+var bob_phase := 0.0
+var bob_offset := Vector3.ZERO
 
 func _ready() -> void:
 	touch_mode = DisplayServer.is_touchscreen_available() or "--touch" in OS.get_cmdline_user_args()
@@ -34,7 +36,20 @@ func _physics_process(delta: float) -> void:
 	else:
 		velocity.y = 0
 	move_and_slide()
+	update_bob(delta, not locked and is_on_floor() and movement.length() > 0.01)
 	refresh_focus()
+
+# Additive offset so camera tweens and the 1.55 base height stay untouched.
+func update_bob(delta: float, walking: bool) -> void:
+	var target := Vector3.ZERO
+	if walking:
+		var pace := Vector2(velocity.x, velocity.z).length() / speed
+		bob_phase += delta * 9.0 * pace
+		target = Vector3(sin(bob_phase * 0.5) * 0.012, absf(sin(bob_phase)) * 0.035, 0) * pace
+	var next := bob_offset.lerp(target, clampf(delta * 10.0, 0, 1))
+	if next.length_squared() < 1e-8: next = Vector3.ZERO
+	camera.position += next - bob_offset
+	bob_offset = next
 
 func refresh_focus() -> void:
 	if not locked:
