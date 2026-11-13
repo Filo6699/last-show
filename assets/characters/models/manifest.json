@@ -1,38 +1,67 @@
 [
   {
     "id": "richard",
-    "reference": "male.fbx",
-    "triangles": 4744,
-    "height": 1.75
+    "reference": "assets/story/photos/richard_child_portrait.png",
+    "triangles": 637,
+    "clips": [
+      "idle_loop"
+    ]
+  },
+  {
+    "id": "richard_home",
+    "reference": "assets/story/photos/richard_child_portrait.png",
+    "triangles": 568,
+    "clips": [
+      "idle_loop"
+    ]
   },
   {
     "id": "mordecai",
-    "reference": "male.fbx",
-    "triangles": 5680,
-    "height": 1.8
+    "reference": "assets/characters/colored/mordecai.png",
+    "triangles": 1070,
+    "clips": [
+      "idle_loop"
+    ]
+  },
+  {
+    "id": "mordecai_attention",
+    "reference": "assets/characters/colored/mordecai.png",
+    "triangles": 1070,
+    "clips": [
+      "idle_loop"
+    ]
   },
   {
     "id": "bruno",
-    "reference": "male.fbx",
-    "triangles": 3924,
-    "height": 2.3
+    "reference": "assets/characters/colored/bruno.png",
+    "triangles": 611,
+    "clips": [
+      "idle_loop"
+    ]
   },
   {
     "id": "elsa",
-    "reference": "female.fbx",
-    "triangles": 4640,
-    "height": 1.7
+    "reference": "assets/characters/colored/elsa.png",
+    "triangles": 1065,
+    "clips": [
+      "idle_loop"
+    ]
   },
   {
     "id": "lili",
-    "reference": "female.fbx",
-    "triangles": 4294,
-    "height": 1.42
+    "reference": "assets/characters/colored/lili.png",
+    "triangles": 871,
+    "clips": [
+      "idle_loop",
+      "walk_loop"
+    ]
   },
   {
     "id": "walter",
-    "reference": "male.fbx",
-    "triangles": 4820,
-    "height": 1.86
+    "reference": "assets/characters/colored/walter.png",
+    "triangles": 768,
+    "clips": [
+      "idle_loop"
+    ]
   }
 ]
