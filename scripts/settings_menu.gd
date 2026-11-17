@@ -15,9 +15,6 @@ var columns: GridContainer
 var rows: Array[Control] = []
 var compact := false
 var quality_row: Control
-var smoothing_row: Control
-var sharpness_row: Control
-var shadows_row: Control
 const PRESET_IDS := ["low", "medium", "high"]
 
 class ValueBar extends Control:
@@ -119,7 +116,6 @@ func build(column: VBoxContainer) -> void:
 	panel.add_child(columns)
 	var left := section_column()
 	var right := section_column()
-	var mood := section_column()
 	section(left, "Звук и управление")
 	left.add_child(value_row("Громкость", 0.0, 1.0, .05, hud.volume,
 		func(value): return str(roundi(value * 100)) + "%",
@@ -129,28 +125,20 @@ func build(column: VBoxContainer) -> void:
 		func(value): hud.sensitivity = value; hud.settings_changed.emit(hud.volume, hud.sensitivity)))
 	var graphics = hud.graphics
 	if graphics:
+		# Only options a player understands at a glance. Anti-aliasing, 3D
+		# sharpness and shadows follow the quality preset; fog and darkness are
+		# part of the look and fixed (graphics_settings.gd).
 		section(left, "Экран")
 		left.add_child(choice_row("Частота кадров", ["30", "60", "Макс."], graphics.FPS_LIMITS.find(graphics.fps_limit),
 			func(index): graphics.set_option("fps_limit", graphics.FPS_LIMITS[index])))
-		left.add_child(choice_row("Счётчик кадров", ["Скрыт", "Показан"], 1 if graphics.show_fps else 0,
-			func(index): graphics.set_option("show_fps", index == 1)))
 		section(right, "Изображение")
 		quality_row = choice_row("Качество", ["Низкое", "Среднее", "Высокое"], PRESET_IDS.find(graphics.preset),
 			func(index): graphics.set_preset(PRESET_IDS[index]))
-		smoothing_row = choice_row("Сглаживание", ["Выкл.", "FXAA", "MSAA 2×", "MSAA 4×"], graphics.aa,
-			func(index): graphics.set_option("aa", index))
-		sharpness_row = choice_row("Чёткость 3D", ["50%", "70%", "85%", "100%"], nearest_scale(graphics.scale),
-			func(index): graphics.set_option("scale", graphics.SCALES[index]))
-		shadows_row = choice_row("Тени", ["Выкл", "Ближние", "Больше"], graphics.shadows,
-			func(index): graphics.set_option("shadows", index))
-		for row in [quality_row, smoothing_row, sharpness_row, shadows_row]: right.add_child(row)
-		section(mood, "Атмосфера")
-		mood.add_child(choice_row("Туман и дымка", ["Нет", "Обычная", "Густая"], graphics.haze,
-			func(index): graphics.set_option("haze", index)))
-		mood.add_child(choice_row("Освещение", ["Обычное", "Тёмное", "Мрак"], graphics.darkness,
-			func(index): graphics.set_option("darkness", index)))
-		mood.add_child(choice_row("Зернистость", ["Нет", "Лёгкая", "Сильная"], graphics.grain,
+		right.add_child(quality_row)
+		right.add_child(choice_row("Зернистость", ["Выкл", "Вкл"], 1 if graphics.grain > 0 else 0,
 			func(index): graphics.set_option("grain", index)))
+		right.add_child(choice_row("Счётчик кадров", ["Скрыт", "Показан"], 1 if graphics.show_fps else 0,
+			func(index): graphics.set_option("show_fps", index == 1)))
 		if not graphics.changed.is_connected(refresh): graphics.changed.connect(refresh)
 		refresh()
 	var back: Button = hud.make_button("Назад", func(): hud.menu_action.emit("settings_back"))
@@ -165,9 +153,6 @@ func refresh() -> void:
 	if not active or not is_instance_valid(quality_row): return
 	var graphics = hud.graphics
 	select(quality_row, PRESET_IDS.find(graphics.preset))
-	select(smoothing_row, graphics.aa)
-	select(sharpness_row, nearest_scale(graphics.scale))
-	select(shadows_row, graphics.shadows)
 	caption_note(quality_row, "своё" if graphics.preset == "custom" else "")
 
 func nearest_scale(value: float) -> int:
@@ -296,7 +281,7 @@ func layout() -> void:
 	# Two columns on landscape screens; a single scrolling column otherwise.
 	var wide := area.x >= 900
 	compact = area.y < 640
-	columns.columns = 3 if area.x >= 1100 else (2 if wide else 1)
+	columns.columns = 2 if wide else 1
 	var width := minf(1120, area.x - 64)
 	hud.menu_column.custom_minimum_size.x = width
 	hud.menu_column.add_theme_constant_override("separation", 6 if compact else 10)

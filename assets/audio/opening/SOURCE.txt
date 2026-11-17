@@ -1,0 +1,4 @@
+Opening cutscene cues (drum roll, band hit, trapeze swish, strongman landing, iron weight,
+clown horn, music-box run, spotlight cut). Deterministic procedural synthesis by
+art_sources/audio/opening_sounds.py. No external recordings. Levels are set in
+scripts/chapter_audio.gd (OPENING_LOUD / OPENING_LEVEL).

@@ -70,24 +70,65 @@ func dynamic(node: Node) -> bool:
 		if game.actors[id].is_ancestor_of(node): return true
 	return false
 
+# Each phase change used to rescan the whole world: find_children over thousands
+# of nodes plus an ancestor walk per mesh, about 35 ms on a laptop and a visible
+# hitch on the phone mid-walk. The scan now runs once; afterwards only nodes
+# added since then are classified, and known ones are re-boxed if they moved.
+var known := {}  # instance id -> [item, transform at classification, side, box]
+var pending: Array = []
+var scanned := false
+
+func classify(node: Node) -> void:
+	var item := node as GeometryInstance3D
+	if item == null or known.has(item.get_instance_id()): return
+	var record := [item, null, -1, AABB()]
+	known[item.get_instance_id()] = record
+	if item is MeshInstance3D and item.skeleton != NodePath(""): return
+	if item is GPUParticles3D or item is CPUParticles3D: return
+	if is_instance_valid(game.mirror_system) and game.mirror_system.is_ancestor_of(item): return
+	if dynamic(item): return
+	rebox(record)
+
+func rebox(record: Array) -> void:
+	var item: GeometryInstance3D = record[0]
+	record[1] = item.global_transform
+	record[3] = item.global_transform * item.get_aabb()
+	record[2] = side_of(record[3])
+
+func on_node_added(node: Node) -> void:
+	if node is GeometryInstance3D: pending.append(node)
+
 func collect() -> void:
+	var changed := not scanned
+	if not scanned:
+		scanned = true
+		for node in game.world.find_children("*", "GeometryInstance3D", true, false): classify(node)
+		get_tree().node_added.connect(on_node_added)
+	else:
+		for node in pending:
+			if is_instance_valid(node) and node.is_inside_tree() and game.world.is_ancestor_of(node):
+				classify(node); changed = true
+		for id in known.keys():
+			var record: Array = known[id]
+			if not is_instance_valid(record[0]) or not record[0].is_inside_tree():
+				known.erase(id); changed = true; continue
+			if record[1] != null and record[0].global_transform != record[1]:
+				rebox(record); changed = true
+	pending.clear()
+	if not changed: return
 	show_all()
 	var cells := [{}, {}]
-	for node in game.world.find_children("*", "GeometryInstance3D", true, false):
-		var item := node as GeometryInstance3D
-		if item is MeshInstance3D and item.skeleton != NodePath(""): continue
-		if item is GPUParticles3D or item is CPUParticles3D: continue
-		if is_instance_valid(game.mirror_system) and game.mirror_system.is_ancestor_of(item): continue
-		if dynamic(item): continue
-		var box := item.global_transform * item.get_aabb()
-		var side := side_of(box)
-		if side < 0: continue
+	for id in known:
+		var record: Array = known[id]
+		var side: int = record[2]
+		if record[1] == null or side < 0: continue
+		var box: AABB = record[3]
 		var centre := box.get_center()
 		var key := Vector3i(floori(centre.x / CELL), floori(centre.y / CELL), floori(centre.z / CELL))
 		if not cells[side].has(key): cells[side][key] = [box, [], false]
 		var cluster: Array = cells[side][key]
 		cluster[0] = cluster[0].merge(box)
-		cluster[1].append(item)
+		cluster[1].append(record[0])
 	clusters = [cells[0].values(), cells[1].values()]
 	last_eye = Vector3.INF
 

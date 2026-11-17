@@ -128,7 +128,17 @@ func _ready() -> void:
 	audio.setup(self)
 	load_settings()
 	update_staging()
+	# Huge meshes become tiles so each pixel only pays for the lamps near it.
+	preload("res://scripts/light_split.gd").split_world(world)
+	if OS.has_feature("mobile"): preload("res://scripts/light_split.gd").fade_far_lights(self)
 	player.set_locked(true)
+	# Only the real launch tours the areas behind a loading screen; tests and the
+	# benchmark load this scene into their own tree and drive it themselves.
+	if get_tree().current_scene == self and DisplayServer.get_name() != "headless":
+		var warmup := preload("res://scripts/shader_warmup.gd").new()
+		add_child(warmup); warmup.setup(self)
+		await warmup.run()
+		warmup.queue_free()
 	hud.show_menu("main", read_save().size() > 0)
 
 func configure_render_budget() -> void:
@@ -173,6 +183,9 @@ func bind_imported(mesh_name: String, id: String, prompt: String) -> void:
 			targets[id].append(body)
 
 func _process(delta: float) -> void:
+	# Debug phone builds log long frames to logcat so hitches are visible.
+	if OS.is_debug_build() and OS.has_feature("mobile") and delta > .1 and not get_viewport().disable_3d:
+		print("hitch ms=", roundi(delta * 1000.0), " phase=", phase, " room=", room_at(player.position))
 	if actors["elsa"].visible:
 		var ceiling: float = 8.0 if room_at(actors["elsa"].position)=="dressing" else 20.0
 		var length: float = maxf(.05,ceiling-actors["elsa"].position.y-.75)
@@ -199,6 +212,19 @@ func _unhandled_input(event: InputEvent) -> void:
 			if hud.line_ready: audio.ui()
 			hud.advance()
 			get_viewport().set_input_as_handled()
+
+# The real launch shows the loading screen while a run starts. Tests and the
+# benchmark drive the scene directly and get the plain call.
+func with_loading(work: Callable) -> void:
+	if get_tree().current_scene != self or DisplayServer.get_name() == "headless":
+		work.call()
+		return
+	if is_instance_valid(get_node_or_null("RunLoading")): return
+	var cover := preload("res://scripts/shader_warmup.gd").new()
+	cover.name = "RunLoading"
+	add_child(cover); cover.setup(self)
+	await cover.cover(work)
+	cover.queue_free()
 
 func new_game() -> void:
 	session += 1
@@ -871,8 +897,8 @@ func sound(id: String) -> void:
 
 func on_menu_action(action: String) -> void:
 	match action:
-		"new_game": new_game()
-		"continue": load_game()
+		"new_game": with_loading(new_game)
+		"continue": with_loading(load_game)
 		"pause":
 			if (transitioning and not flags.get("photo_reveal_pending", false)) or hud.menu.visible: return
 			menu_kind = "pause"

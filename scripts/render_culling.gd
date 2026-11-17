@@ -14,6 +14,13 @@ var game
 var shadow_lights: Array[Light3D] = []
 var shadow_clock := 0.0
 const SHADOW_INTERVAL := .25
+# A key handing its shadow map to another used to switch in one frame: the
+# picture jumped wherever either key reached (the dressing passage, where the
+# backstage key hands over to the dressing key). The outgoing shadow now fades
+# out, then the incoming one fades in, so no more than the budget is ever
+# shadowed and the handover costs nothing extra.
+const SHADOW_FADE := .45
+var shadow_wanted := {}
 # Visibility bounds per actor, grown so a nearby shadow keeps its owner moving.
 const ACTOR_BOUNDS := AABB(Vector3(-2.2, -2.2, -2.2), Vector3(4.4, 5.4, 4.4))
 
@@ -22,15 +29,14 @@ func setup(owner_game) -> void:
 	# build_occluders() culled the tent roof when looking up, leaving a white screen.
 	for id in game.actors: watch_actor(game.actors[id])
 	build_room_occluders()
-	# Added before ZoneCulling so tiles exist when the zones collect geometry.
-	var tiles := preload("res://scripts/light_tiles.gd").new()
-	tiles.name = "LightTiles"; add_child(tiles); tiles.setup(game)
 	var zones := preload("res://scripts/zone_culling.gd").new()
 	zones.name = "ZoneCulling"; add_child(zones); zones.setup(game)
 	for light in game.find_children("*", "Light3D", true, false):
-		if light.shadow_enabled and not light is DirectionalLight3D: shadow_lights.append(light)
-	update_shadows()
-	if is_instance_valid(game.graphics): game.graphics.changed.connect(update_shadows)
+		if light.shadow_enabled and not light is DirectionalLight3D:
+			shadow_lights.append(light); light.set_meta("shadow_rest", light.shadow_opacity)
+	update_shadows(true)
+	# The settings menu covers the view, so a new budget applies at once.
+	if is_instance_valid(game.graphics): game.graphics.changed.connect(update_shadows.bind(true))
 
 # The service corridor and the clinic are closed boxes inside the big tent. From
 # there the ring is only visible through the narrow corridor mouth, yet without
@@ -109,7 +115,7 @@ func build_room_occluders() -> void:
 # Shadows follow the camera: the keys whose reach covers it, nearest first, keep
 # their shadow maps; distant ones light without them. A small bonus for lights
 # already shadowed stops two equally near keys from flickering between frames.
-func update_shadows() -> void:
+func update_shadows(instant := false) -> void:
 	var budget: int = game.graphics.shadow_light_count() if is_instance_valid(game.graphics) else 2
 	var eye: Vector3 = game.player.camera.global_position
 	var ranked: Array = []
@@ -118,12 +124,33 @@ func update_shadows() -> void:
 		var reach: float = light.spot_range if light is SpotLight3D else light.omni_range
 		var distance := eye.distance_to(light.global_position)
 		if distance > reach * 1.15: continue
-		ranked.append([distance / reach - (.1 if light.shadow_enabled else 0.0), light])
+		ranked.append([distance / reach - (.1 if shadow_wanted.has(light) else 0.0), light])
 	ranked.sort_custom(func(a, b): return a[0] < b[0])
 	var chosen := {}
 	for index in mini(budget, ranked.size()): chosen[ranked[index][1]] = true
+	shadow_wanted = chosen
+	if instant: fade_shadows(SHADOW_FADE, budget)
+
+# Shadow opacity is a plain light parameter: changing it does not re-render the
+# shadow map. shadow_enabled is written only when it really changes, since every
+# write invalidates the map and re-pairs the light with geometry.
+func fade_shadows(delta: float, budget: int) -> void:
+	var shadowed := 0
 	for light in shadow_lights:
-		if is_instance_valid(light): light.shadow_enabled = chosen.has(light)
+		if is_instance_valid(light) and light.shadow_enabled: shadowed += 1
+	for light in shadow_lights:
+		if not is_instance_valid(light) or shadow_wanted.has(light) or not light.shadow_enabled: continue
+		light.shadow_opacity = move_toward(light.shadow_opacity, 0.0, light.get_meta("shadow_rest") * delta / SHADOW_FADE)
+		if light.shadow_opacity <= 0.0:
+			light.shadow_enabled = false; shadowed -= 1
+	for light in shadow_wanted:
+		if not is_instance_valid(light): continue
+		if not light.shadow_enabled:
+			# Wait until an outgoing shadow has left so the budget holds.
+			if shadowed >= budget: continue
+			light.shadow_opacity = 0.0; light.shadow_enabled = true; shadowed += 1
+		var rest: float = light.get_meta("shadow_rest")
+		light.shadow_opacity = move_toward(light.shadow_opacity, rest, rest * delta / SHADOW_FADE)
 
 func build_occluders() -> void:
 	# Occluders reuse the exact canvas triangles, so they hide nothing that the
@@ -212,6 +239,7 @@ func _process(delta: float) -> void:
 	if shadow_clock >= SHADOW_INTERVAL:
 		shadow_clock = 0.0
 		update_shadows()
+	fade_shadows(delta, game.graphics.shadow_light_count() if is_instance_valid(game.graphics) else 2)
 	var hud = game.hud
 	# Menus, story cards and a fully black fade cover the world so heavily that
 	# drawing it only costs frames; the backdrop shows the same near-black.

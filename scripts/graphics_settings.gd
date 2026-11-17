@@ -38,8 +38,8 @@ var fps_label: Label
 # Atmosphere sits outside the quality presets: grain and darkness are mood,
 # haze rescales each environment's fog from its authored distances.
 var grain := 1
-var darkness := 0
-var haze := 1
+var darkness := 2
+var haze := 2
 var veil: ColorRect
 const GRAIN_AMOUNT := [0.0, 0.075, 0.16]
 const DARKNESS_AMOUNT := [0.0, 0.24, 0.42]
@@ -49,6 +49,19 @@ const HAZE_NEAR := [1.0, 1.0, 0.42]
 const HAZE_FAR := [1.0, 1.0, 0.58]
 var fxaa_layer: CanvasLayer
 var fps_clock := 0.0
+# Phones lower the 3D resolution while frames run longer than the 60 fps target
+# and raise it again when there is headroom. The Mali GPU is fill and lighting
+# bound, so pixels are the lever that holds play smooth; the sharpness option
+# stays the ceiling.
+var adaptive := true
+var dynamic_scale := 1.0
+var adapt_times: Array[float] = []
+var adapt_clock := 0.0
+var adapt_probe := 0.0
+const ADAPT_MIN := .7
+const ADAPT_STEP := .05
+const ADAPT_WINDOW := 1.0
+const ADAPT_PROBE := 15.0
 
 func setup(owner_game) -> void:
 	game = owner_game
@@ -86,20 +99,25 @@ func setup(owner_game) -> void:
 	fps_label.hide()
 
 func to_dict() -> Dictionary:
-	return {"preset": preset, "aa": aa, "scale": scale, "shadows": shadows, "fps_limit": fps_limit, "show_fps": show_fps, "grain": grain, "darkness": darkness, "haze": haze}
+	return {"preset": preset, "aa": aa, "scale": scale, "shadows": shadows, "fps_limit": fps_limit, "show_fps": show_fps, "grain": grain, "darkness": darkness, "haze": haze, "adaptive": adaptive}
 
 func load_dict(values: Dictionary) -> void:
 	preset = String(values.get("preset", preset))
-	if not preset in PRESETS and preset != "custom": preset = "custom"
+	# Individual picture options left the menu, so a hand-made mix from an
+	# older save falls back to the default preset.
+	if not preset in PRESETS: preset = "medium"
 	aa = clampi(int(values.get("aa", aa)), 0, AA_MSAA.size() - 1)
 	scale = clampf(float(values.get("scale", scale)), SCALES[0], 1.0)
 	shadows = clampi(int(values.get("shadows", shadows)), 0, SHADOW_ATLAS.size() - 1)
 	fps_limit = int(values.get("fps_limit", fps_limit))
 	if not fps_limit in FPS_LIMITS: fps_limit = 60
 	show_fps = bool(values.get("show_fps", show_fps))
-	grain = clampi(int(values.get("grain", grain)), 0, 2)
-	darkness = clampi(int(values.get("darkness", darkness)), 0, 2)
-	haze = clampi(int(values.get("haze", haze)), 0, 2)
+	# Grain is on (medium) or off; fog, darkness and the phone's adaptive
+	# resolution are part of the look and no longer player options.
+	grain = 1 if int(values.get("grain", grain)) > 0 else 0
+	darkness = 2
+	haze = 2
+	adaptive = true
 	# A named preset follows the current table, so saves made before the phone
 	# presets dropped MSAA pick up the change.
 	if preset != "custom":
@@ -112,6 +130,13 @@ func set_preset(id: String) -> void:
 	if not table.has(id): return
 	preset = id
 	aa = table[id].aa; scale = table[id].scale; shadows = table[id].shadows
+	apply()
+
+# Turning the option off restores the chosen sharpness at once.
+func set_adaptive(on: bool) -> void:
+	adaptive = on
+	dynamic_scale = 1.0
+	adapt_times.clear(); adapt_clock = 0.0; adapt_probe = 0.0
 	apply()
 
 func set_option(option: String, value) -> void:
@@ -154,10 +179,11 @@ func apply_scale() -> void:
 		budget = minf(1.0, minf(1280.0 / maxf(1.0, pixels.x), 720.0 / maxf(1.0, pixels.y)))
 	var view := get_viewport()
 	view.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
-	view.scaling_3d_scale = budget * scale
+	view.scaling_3d_scale = budget * scale * dynamic_scale
 
 func _process(delta: float) -> void:
 	var drawn := not get_viewport().disable_3d
+	adapt_resolution(delta, drawn)
 	fxaa_layer.visible = drawn and (grain > 0 or darkness > 0)
 	# The screen-texture FXAA rect rendered half the frame white on some GPUs; it stays off.
 	fxaa_layer.get_child(0).visible = false
@@ -168,6 +194,30 @@ func _process(delta: float) -> void:
 	if fps_clock < .5: return
 	fps_clock = 0.0
 	fps_label.text = "%d FPS" % Engine.get_frames_per_second()
+
+# Compares the median frame over one window with the frame target. The phone's
+# 60 fps cap hides headroom, so a scale that has settled probes one step up every
+# ADAPT_PROBE seconds; the next window steps it back down if the scene is heavy.
+func adapt_resolution(delta: float, drawn: bool) -> void:
+	if not mobile or not adaptive or not drawn:
+		adapt_times.clear(); adapt_clock = 0.0
+		return
+	adapt_times.append(delta)
+	adapt_clock += delta
+	adapt_probe += delta
+	if adapt_clock < ADAPT_WINDOW: return
+	adapt_clock = 0.0
+	adapt_times.sort()
+	var median_frame: float = adapt_times[adapt_times.size() / 2]
+	adapt_times.clear()
+	var target := 1.0 / 30.0 if fps_limit == 30 else 1.0 / 60.0
+	var step := 0.0
+	if median_frame > target * 1.1 and dynamic_scale > ADAPT_MIN: step = -ADAPT_STEP
+	elif (median_frame < target * .8 or adapt_probe >= ADAPT_PROBE) and dynamic_scale < 1.0: step = ADAPT_STEP
+	if step == 0.0: return
+	adapt_probe = 0.0
+	dynamic_scale = maxf(ADAPT_MIN, dynamic_scale + step) if step < 0.0 else minf(1.0, dynamic_scale + step)
+	apply_scale()
 
 # Scenes swap whole Environment resources, so each one is rescaled the first
 # time the camera shows it, and again whenever the haze option changes.

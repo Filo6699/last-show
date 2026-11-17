@@ -1,6 +1,7 @@
 [
   {
     "id": "richard",
+    "build": "art_sources/characters/lowpoly/build_richard.py",
     "reference": "assets/story/photos/richard_child_portrait.png",
     "triangles": 637,
     "clips": [
@@ -9,6 +10,7 @@
   },
   {
     "id": "richard_home",
+    "build": "art_sources/characters/lowpoly/build_richard.py",
     "reference": "assets/story/photos/richard_child_portrait.png",
     "triangles": 568,
     "clips": [
@@ -17,6 +19,7 @@
   },
   {
     "id": "mordecai",
+    "build": "art_sources/characters/lowpoly/build_mordecai.py",
     "reference": "assets/characters/colored/mordecai.png",
     "triangles": 1070,
     "clips": [
@@ -25,6 +28,7 @@
   },
   {
     "id": "mordecai_attention",
+    "build": "art_sources/characters/lowpoly/build_mordecai.py",
     "reference": "assets/characters/colored/mordecai.png",
     "triangles": 1070,
     "clips": [
@@ -33,6 +37,7 @@
   },
   {
     "id": "bruno",
+    "build": "art_sources/characters/lowpoly/build_bruno.py",
     "reference": "assets/characters/colored/bruno.png",
     "triangles": 611,
     "clips": [
@@ -41,6 +46,7 @@
   },
   {
     "id": "elsa",
+    "build": "art_sources/characters/lowpoly/build_elsa.py",
     "reference": "assets/characters/colored/elsa.png",
     "triangles": 1065,
     "clips": [
@@ -49,6 +55,7 @@
   },
   {
     "id": "lili",
+    "build": "art_sources/characters/lowpoly/build_lili.py",
     "reference": "assets/characters/colored/lili.png",
     "triangles": 871,
     "clips": [
@@ -58,6 +65,7 @@
   },
   {
     "id": "walter",
+    "build": "art_sources/characters/lowpoly/build_walter.py",
     "reference": "assets/characters/colored/walter.png",
     "triangles": 768,
     "clips": [

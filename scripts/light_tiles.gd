@@ -10,8 +10,14 @@ extends Node
 ## it with an identity transform, so they inherit its placement and visibility
 ## (story code still toggles the original). The original stays in the tree with
 ## its mesh, colliders and bounds, but renders on no layer.
+##
+## Tiles follow the lamps, not a grid: a quadtree splits a mesh only while more
+## than LIGHT_BUDGET lamps reach a piece. A uniform 12 m grid cut the 200 m
+## ground outside the tent, where few lamps reach, into 322 draw calls.
 var game
-const CELL := 12.0
+# Triangles longer than this are cut before tiling; also the smallest tile.
+const CELL := 8.0
+const LIGHT_BUDGET := 8
 # Meshes smaller than this across (XZ, metres) keep a short light list already.
 const MIN_SIZE := 18.0
 const FIRST_RUN := .9
@@ -23,6 +29,12 @@ var last_phase := ""
 # Slicing runs on a worker thread: on a phone the opening froze for seconds.
 var task := -1
 var jobs: Array = []
+
+# The worker reads this node's methods; a scene freed mid-slice must wait for it.
+func _exit_tree() -> void:
+	if task >= 0:
+		WorkerThreadPool.wait_for_task_completion(task); task = -1
+	jobs.clear()
 
 func setup(owner_game) -> void:
 	game = owner_game
@@ -84,8 +96,14 @@ func start() -> void:
 			surfaces.append(arrays)
 		if ok: jobs.append({"item": node, "transform": node.global_transform, "surfaces": surfaces, "cells": {}})
 	if jobs.is_empty(): return
+	# Every lamp counts, hidden ones too: story code switches them on later.
+	lamps.clear()
+	for light in game.find_children("*", "Light3D", true, false):
+		if light is DirectionalLight3D: continue
+		lamps.append([light.global_position, light.spot_range if light is SpotLight3D else light.omni_range])
 	task = WorkerThreadPool.add_task(slice_all)
 
+var lamps: Array = []
 func slice_all() -> void:
 	for job in jobs: job.cells = slice(job.surfaces, job.transform)
 
@@ -120,23 +138,62 @@ func finish() -> void:
 		item.set_meta("light_tiled", item.layers)
 		item.layers = 0
 
-# Returns cell -> [[surface, compacted arrays], ...]. Touches no nodes.
+# Returns tile -> [[surface, compacted arrays], ...]. Touches no nodes.
 func slice(surfaces: Array, to_world: Transform3D) -> Dictionary:
-	var cells := {}
+	var splits: Array = []
+	# Per triangle: world XZ centre, surface, first index.
+	var centres := PackedVector2Array(); var owners := PackedInt32Array(); var starts := PackedInt32Array()
+	var low := INF; var high := -INF
+	var area := Rect2()
 	for surface in surfaces.size():
 		var split := subdivide(surfaces[surface], to_world)
+		splits.append(split)
 		var points: PackedVector3Array = split[Mesh.ARRAY_VERTEX]
 		var indices: PackedInt32Array = split[Mesh.ARRAY_INDEX]
-		var binned := {}
+		for point in points:
+			var y := (to_world * point).y
+			low = minf(low, y); high = maxf(high, y)
 		for t in range(0, indices.size(), 3):
 			var centre := to_world * ((points[indices[t]] + points[indices[t + 1]] + points[indices[t + 2]]) / 3.0)
-			var key := Vector2i(floori(centre.x / CELL), floori(centre.z / CELL))
-			if not binned.has(key): binned[key] = PackedInt32Array()
-			binned[key].append_array([indices[t], indices[t + 1], indices[t + 2]])
-		for key in binned:
-			if not cells.has(key): cells[key] = []
-			cells[key].append([surface, compact(split, binned[key])])
+			var flat := Vector2(centre.x, centre.z)
+			area = Rect2(flat, Vector2.ZERO) if centres.is_empty() else area.expand(flat)
+			centres.append(flat); owners.append(surface); starts.append(t)
+	var all := PackedInt32Array(); all.resize(centres.size())
+	for i in centres.size(): all[i] = i
+	var leaves: Array = []
+	partition(area, all, centres, low, high, leaves)
+	var cells := {}
+	for leaf in leaves.size():
+		var by_surface := {}
+		for id in leaves[leaf]:
+			var surface := owners[id]
+			if not by_surface.has(surface): by_surface[surface] = PackedInt32Array()
+			var indices: PackedInt32Array = splits[surface][Mesh.ARRAY_INDEX]
+			var t := starts[id]
+			by_surface[surface].append_array([indices[t], indices[t + 1], indices[t + 2]])
+		cells[leaf] = []
+		for surface in by_surface: cells[leaf].append([surface, compact(splits[surface], by_surface[surface])])
 	return cells
+
+func partition(rect: Rect2, ids: PackedInt32Array, centres: PackedVector2Array, low: float, high: float, leaves: Array) -> void:
+	var box := AABB(Vector3(rect.position.x, low, rect.position.y), Vector3(rect.size.x, high - low, rect.size.y))
+	var reach := 0
+	for lamp in lamps:
+		var p: Vector3 = lamp[0]
+		var nearest := Vector3(clampf(p.x, box.position.x, box.end.x), clampf(p.y, box.position.y, box.end.y), clampf(p.z, box.position.z, box.end.z))
+		if p.distance_to(nearest) < lamp[1]: reach += 1
+	if reach <= LIGHT_BUDGET or maxf(rect.size.x, rect.size.y) <= CELL:
+		leaves.append(ids); return
+	var middle := rect.get_center()
+	var parts := [PackedInt32Array(), PackedInt32Array(), PackedInt32Array(), PackedInt32Array()]
+	for id in ids:
+		var c := centres[id]
+		parts[int(c.x >= middle.x) + 2 * int(c.y >= middle.y)].append(id)
+	var half := rect.size * .5
+	for quarter in 4:
+		if parts[quarter].is_empty(): continue
+		var corner := rect.position + Vector2(half.x * (quarter % 2), half.y * (quarter / 2))
+		partition(Rect2(corner, half), parts[quarter], centres, low, high, leaves)
 
 # Splits triangles longer than a cell into four, so huge quads such as the floor
 # can be divided between tiles. Every vertex attribute is interpolated.

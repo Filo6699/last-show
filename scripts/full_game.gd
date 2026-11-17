@@ -23,6 +23,7 @@ var home_body:Mesh
 var hidden_show_lights:Dictionary={}
 var arena_night_env:Environment
 var knife_throw:Node3D
+var collapse:Node3D
 
 func setup(owner_game) -> void:
 	game=owner_game;name="FullScenario"
@@ -32,6 +33,7 @@ func setup(owner_game) -> void:
 	set_dressing=preload("res://scripts/circus_set.gd").new();add_child(set_dressing);set_dressing.setup(game)
 	late=preload("res://scripts/late_locations.gd").new();add_child(late);late.setup(game)
 	knife_throw=preload("res://scripts/knife_throw.gd").new();add_child(knife_throw);knife_throw.setup(game)
+	collapse=preload("res://scripts/roof_collapse.gd").new();add_child(collapse);collapse.setup(game,late)
 	arena_night_env=game.get_node("World/WorldEnvironment").environment.duplicate()
 	arena_night_env.ambient_light_energy=.12;arena_night_env.fog_depth_begin=10;arena_night_env.fog_depth_end=75
 
@@ -112,7 +114,8 @@ func interact(id:StringName) -> bool:
 		"roof_return":game.start_dialogue("roof_descent")
 		"roof_rope":
 			if not game.flags.get("rope_cut",false):game.start_dialogue("roof_rope")
-		"trampoline":game.start_dialogue("trampoline")
+		# With the rope cut the tent is coming down: no waltz, no audience.
+		"trampoline":game.start_dialogue("trampoline_collapse" if game.flags.get("rope_cut",false) else "trampoline")
 		"roof_note":
 			if not is_instance_valid(note_view):
 				note_view=preload("res://scripts/roof_note.gd").new();add_child(note_view);note_view.setup(game)
@@ -139,7 +142,7 @@ func finish_dialogue(id:String) -> bool:
 			else:game.phase="trapped"
 			game.update_staging();game.save_game();game.player.set_locked(false)
 		"roof_rope":game.update_staging();game.player.set_locked(false);game.save_game()
-		"trampoline","roof_descent":
+		"trampoline","trampoline_collapse","roof_descent":
 			var choice:String=game.flags.get("roof_choice","stay")
 			if choice=="jump":jump_home()
 			elif choice=="back":
@@ -168,10 +171,10 @@ func event(id:String) -> bool:
 			game.flags.service_open=false;game.location.sync();game.sound("locked")
 		"cut_rope":
 			game.audio.play("sfx_rope_cut",-8,late.ROPE)
-			late.rope_piece.hide()
-			active_tween=create_tween()
-			active_tween.tween_property(late.medicine_bag,"position:y",-15.0,1.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-			active_tween.tween_callback(late.medicine_bag.hide)
+			late.rope_piece.hide();late.rope_target.collision_layer=0
+			collapse.drop_bag()
+		"tent_sags":
+			collapse.jolt()
 		"roof_audience":
 			game.flags.roof_audience=true;game.location.stage_show.sync_damage()
 			game.location.stage_show.start_applause()
@@ -434,14 +437,6 @@ func check_walk_progress() -> void:
 		game.phase="roof_access";game.update_staging();game.save_game()
 		game.audio.emote("mordecai_smile")
 		game.hud.show_notice("Ричард… Не опоздай.")
-	# First good look at the knife in the open trunk: one thought hints at its use.
-	var knife:Node3D=set_dressing.knife if is_instance_valid(set_dressing) else null
-	if knife and knife.visible and not game.flags.get("knife_noticed",false) and not game.hud.dialog.visible:
-		var eye:Vector3=game.player.camera.global_position
-		var to_knife:Vector3=knife.global_position-eye
-		if to_knife.length()<5.0 and to_knife.normalized().dot(-game.player.camera.global_basis.z)>.9:
-			game.flags["knife_noticed"]=true
-			game.hud.show_notice("Нож в сундуке Лили. Заберу: вдруг придётся что-то перерезать.")
 	if game.phase=="roof" and game.player.position.y<late.ROOF_FLOOR-1:
 		game.place_player(late.ROOF_ENTRY,late.ROPE)
 
@@ -455,6 +450,7 @@ func reset_motion() -> void:
 	if is_instance_valid(apparition):apparition.queue_free()
 	apparition=null
 	if is_instance_valid(late):late.medicine_bag.position=Vector3.ZERO
+	if is_instance_valid(collapse):collapse.reset()
 
 func reset_new_run() -> void:
 	old_phase="";game.hud.ending_title="";game.hud.ending_description=""

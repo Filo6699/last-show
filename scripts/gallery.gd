@@ -283,12 +283,15 @@ func reserved_passage(at: Vector3) -> bool:
 	var across := offset.dot(Vector2(-.447214,-.894427))
 	return along > -8 and along < 17 and absf(across) < 3.1
 
-func add_closed_block(builder: SurfaceTool, bottom: Array[Vector3], heights: Array) -> void:
+func add_closed_block(builder: SurfaceTool, bottom: Array[Vector3], heights: Array, near_end := true, far_end := true) -> void:
 	var points := bottom.duplicate()
 	for i in 4:
 		points.append(Vector3(bottom[i].x, float(heights[i]), bottom[i].z))
 	# Double-sided material handles both outer faces and the underside of stairs.
+	# Chained blocks skip the faces they share: a buried end face is a ledge
+	# in the trimesh collider that stops a capsule where the slope begins.
 	for face in [[0,1,3,2], [4,6,7,5], [0,4,5,1], [2,3,7,6], [0,2,6,4], [1,5,7,3]]:
+		if (face == [0,4,5,1] and not near_end) or (face == [2,3,7,6] and not far_end): continue
 		for i in [0,1,2,0,2,3]: builder.add_vertex(points[face[i]])
 
 func add_mesh_collision(node: MeshInstance3D) -> void:
@@ -311,8 +314,9 @@ func aisle(angle: float) -> void:
 	var landing := normal * 46.8 + Vector3(0, 6.05, 0)
 	if tread(43.0, angle).is_empty() and tread(43.0, angle+.06).is_empty() and tread(43.0, angle-.06).is_empty(): return
 	var builder := SurfaceTool.new(); builder.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for ends in [[entry,start],[start,end],[end,landing]]:
-		var first: Vector3 = ends[0]; var last: Vector3 = ends[1]
+	var chain := [[entry,start],[start,end],[end,landing]]
+	for part in chain.size():
+		var first: Vector3 = chain[part][0]; var last: Vector3 = chain[part][1]
 		var bottom: Array[Vector3] = []
 		for point in [first-tangent,first+tangent,last-tangent,last+tangent]:
 			var floor_y := -.05
@@ -321,7 +325,7 @@ func aisle(angle: float) -> void:
 			if absf(wrapf(angle - 11*TAU/12,-PI,PI)) < .01:
 				floor_y = point.y - .14
 			bottom.append(Vector3(point.x,floor_y,point.z))
-		add_closed_block(builder,bottom,[first.y,first.y,last.y,last.y])
+		add_closed_block(builder,bottom,[first.y,first.y,last.y,last.y],part == 0,part == chain.size() - 1)
 	builder.generate_normals()
 	var ramp := mesh_node(builder.commit(), Vector3.ZERO, material("603943"), "GalleryAccessAisle")
 	ramp.set_meta("dynamic_set", true)
@@ -331,21 +335,21 @@ func aisle(angle: float) -> void:
 		rod(start+tangent*side+Vector3(0,.018,0), end+tangent*side+Vector3(0,.018,0), .022, "aa8b57")
 	# Invisible balustrades keep visitors on the stairs: the benches beside the
 	# aisle are scenery, and dropping into the rows put the camera in the seats.
-	var forward := (end - start).normalized()
+	# Each balustrade is a vertical slab that follows the ramp. It starts at
+	# the front of the stands, so its end is buried in their face and the foot
+	# of the stairs stays open: a visitor can step on or off it from the arena
+	# floor. A box tilted with the slope used to lean over the first step and
+	# wedge the capsule between the rail and the floor.
 	var side_axis := tangent.normalized()
-	if forward.cross(side_axis).y < 0: side_axis = -side_axis
-	var up := forward.cross(side_axis).normalized()
 	var guard_body: StaticBody3D = ramp.get_child(0)
+	var guard_from := start.lerp(end, (34.9 - 33.1) / (45.5 - 33.1))
 	for side in [-1,1]:
-		var guard := CollisionShape3D.new(); var bounds := BoxShape3D.new()
-		bounds.size = Vector3(.1, 1.2, start.distance_to(end) + .2); guard.shape = bounds
-		guard.transform = Transform3D(Basis(side_axis, up, forward), (start + end) * .5 + up * .6 + side_axis * side * .93)
+		var points := PackedVector3Array()
+		for thickness in [-.05, .05]:
+			var lateral: Vector3 = side_axis * (side * .93 + thickness)
+			for along in [guard_from, end]:
+				points.append(along + lateral + Vector3(0, -.1, 0))
+				points.append(along + lateral + Vector3(0, 1.2, 0))
+		var guard := CollisionShape3D.new(); var bounds := ConvexPolygonShape3D.new()
+		bounds.points = points; guard.shape = bounds
 		guard_body.add_child(guard)
-		# The tilted rail leans over the foot of the stairs: its top edge sits
-		# about half a metre before the ramp. A round post right under that
-		# edge makes a visitor beside the stairs slide onto them, not stick.
-		var tip: Vector3 = (start + end) * .5 + up * 1.2 + forward * (start.distance_to(end) + .2) * .5 + side_axis * side * .93
-		var post := CollisionShape3D.new(); var post_shape := CylinderShape3D.new()
-		post_shape.radius = .2; post_shape.height = maxf(tip.y, .3); post.shape = post_shape
-		post.position = Vector3(tip.x, post_shape.height * .5, tip.z)
-		guard_body.add_child(post)

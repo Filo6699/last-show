@@ -36,7 +36,7 @@ var effects: Array[Node] = []
 var paused := false
 var paused_tweens: Array[Tween] = []
 var ending := false
-var step_distance := 0.0
+var heard_steps := 0 # player.steps already voiced
 var previous_position := Vector3.ZERO
 var previous_mordecai := Vector3.ZERO
 var mordecai_step := 0.0
@@ -46,7 +46,6 @@ var rig_clock := 11.0
 var box_clock := 1.0
 var drone: AudioStreamPlayer
 var drone_fade: Tween
-var next_step := .95
 var recent := {} # Last variation in each family; avoid immediate repeats.
 
 func setup(owner_game) -> void:
@@ -353,7 +352,7 @@ func reset() -> void:
 	set_paused(false)
 	for light in game.location.lamps: light.light_energy=float(light.get_meta("rest_energy",1.35))
 	random_clock=randf_range(6,20);rig_clock=randf_range(12,24);flicker_clock=randf_range(3,8);box_clock=1
-	step_distance=0;mordecai_step=0;next_step=.95
+	heard_steps=game.player.steps;mordecai_step=0
 	if drone_fade: drone_fade.kill()
 	drone.stop()
 	previous_position=game.player.position;previous_mordecai=game.actors.mordecai.position
@@ -370,15 +369,13 @@ func _process(delta: float) -> void:
 	var npc_walked := mordecai.position.distance_to(previous_mordecai)
 	previous_mordecai=mordecai.position
 	if paused or game.hud.menu.visible:return
-	if not game.player.locked and game.player.is_on_floor() and walked<1 and walked>.002:
-		step_distance+=walked
-		if step_distance>next_step:
-			step_distance=0
-			next_step=randf_range(.78,1.18) # uneven stride: no machine-gun rhythm
-			if randf()>.08: # now and then a step is missed or too soft to hear
-				var step: Node = play(variation("sfx_step_clinic" if game.room_at(position) in ["clinic","home"] else "sfx_step_wood",8),0,Vector3.INF,"Steps",randf_range(-4.5,1.0))
-				step.pitch_scale = randf_range(.82,1.02)
-	else:step_distance=0
+	# One soft step per camera dip (player.gd counts footfalls by distance walked),
+	# so sound and bob share one even pace. Small level/pitch spread only.
+	if game.player.steps!=heard_steps:
+		heard_steps=game.player.steps
+		if not game.player.locked and walked<1:
+			var step: Node = play(variation("sfx_step_clinic" if game.room_at(position) in ["clinic","home"] else "sfx_step_wood",8),0,Vector3.INF,"Steps",randf_range(-2.5,-1.0))
+			step.pitch_scale = randf_range(.92,.99)
 	if mordecai.visible and npc_walked>.001 and npc_walked<1:
 		mordecai_step+=npc_walked
 		if mordecai_step>.8:
@@ -403,3 +400,64 @@ func shutdown() -> void:
 		if p is AudioStreamPlayer or p is AudioStreamPlayer3D:
 			p.stop();p.stream=null
 	streams.clear()
+
+# ---- Opening cutscene (scripts/opening_cutscene.gd) -----------------------------------
+# Synthesised show cues, generator: art_sources/audio/opening_sounds.py. OPENING_LOUD is each
+# file's measured loudness (LUFS, ffmpeg ebur128); OPENING_LEVEL is where it lands in the mix,
+# read against TIER_DB: band hits sit between the music (-40) and ordinary SFX (-34); the
+# strongman's landing is a plain stage footfall, far under the scare tier (-22).
+const OPENING_LOUD := {"sfx_open_chime":-14.5, "sfx_open_horn":-13.5, "sfx_open_iron":-20.3, "sfx_open_land":-22.2, "sfx_open_light_cut":-27.8, "sfx_open_roll":-17.7, "sfx_open_swish":-14.9, "sfx_open_tada":-22.1}
+const OPENING_LEVEL := {"sfx_open_chime":-38.0, "sfx_open_horn":-37.0, "sfx_open_iron":-41.0, "sfx_open_land":-37.0, "sfx_open_light_cut":-38.0, "sfx_open_roll":-38.0, "sfx_open_swish":-40.0, "sfx_open_tada":-35.0}
+var opening_bed: Tween
+
+# Loads every opening cue up front, so the show never waits on a file mid-act.
+func preload_opening() -> void:
+	for id in OPENING_LEVEL:
+		if not streams.has(id): streams[id] = load("res://assets/audio/opening/%s.wav" % id)
+
+# A synthesised opening cue (sfx_open_*), or a pack sound at an explicit loudness (LUFS)
+# instead of its story tier: in the show, trunk bumps are a trick, not a scare.
+func opening_sound(id: String, lufs := NAN, pitch := 1.0, from := 0.0) -> Node:
+	if OPENING_LEVEL.has(id) and not streams.has(id): streams[id] = load("res://assets/audio/opening/%s.wav" % id)
+	var p: Node = play(id)
+	if OPENING_LEVEL.has(id): p.volume_db = (OPENING_LEVEL[id] if is_nan(lufs) else lufs) - OPENING_LOUD[id]
+	else: p.volume_db = lufs - float(LOUD.get(family(id), -24.0))
+	p.pitch_scale = pitch
+	p.set_meta("opening", true)
+	if from > 0.0: p.play(from)
+	return p
+
+# A short burst of the audience applauding: swells in, holds, dies away.
+func opening_cheer(seconds: float, lufs: float) -> void:
+	var p: Node = opening_sound("sfx_applause", lufs, randf_range(.97, 1.03), randf_range(0.0, 2.5))
+	var level: float = p.volume_db
+	p.volume_db = level - 14.0
+	var tween: Tween = p.create_tween() # dies with the player if reset() frees it first
+	pending.append(tween)
+	tween.tween_property(p, "volume_db", level, .25)
+	tween.tween_interval(seconds)
+	tween.tween_property(p, "volume_db", -60.0, 1.1).set_ease(Tween.EASE_IN)
+	tween.tween_callback(release.bind(p))
+
+# Lifts the full-house murmur under the opening (dB over its tier); 0 returns it.
+func opening_crowd(boost_db: float, seconds: float) -> void:
+	if zone != "arena_show": return
+	if opening_bed and opening_bed.is_valid(): opening_bed.kill()
+	opening_bed = create_tween()
+	opening_bed.tween_property(beds[bed_index], "volume_db", level_db("amb_arena_show_loop", boost_db), seconds)
+
+# Skip or end of the opening: whatever the show still plays fades out instead of cutting.
+func opening_stop(seconds := .4) -> void:
+	for p in effects.duplicate():
+		if is_instance_valid(p) and p.has_meta("opening") and p.playing:
+			var tween: Tween = p.create_tween()
+			tween.tween_property(p, "volume_db", -60.0, seconds)
+			tween.tween_callback(release.bind(p))
+	opening_crowd(0.0, 1.5)
+
+# Stopping a player skips its `finished` signal; drop it the way play() would.
+func release(p: Node) -> void:
+	if not is_instance_valid(p): return
+	effects.erase(p)
+	p.stop()
+	p.queue_free()

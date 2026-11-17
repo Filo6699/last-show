@@ -10,8 +10,19 @@ var focus: Object
 var touch_mode: bool = false
 var focus_query := PhysicsRayQueryParameters3D.new()
 var last_focus_prompt := ""
+# Walking bob: the camera dips once per footfall, sways once per stride pair.
+# The phase follows the distance actually walked, so the dip, the footstep
+# sound (chapter_audio.gd counts `steps`) and the pace always agree.
+const STRIDE := 1.1
+const BOB_DIP := .018
+const BOB_SWAY := .008
+# Seconds for the bob to fade in after the first step and out after the last.
+const BOB_EASE := .4
 var bob_phase := 0.0
+var bob_rate := 0.0
+var bob_weight := 0.0
 var bob_offset := Vector3.ZERO
+var steps := 0
 
 func _ready() -> void:
 	touch_mode = DisplayServer.is_touchscreen_available() or "--touch" in OS.get_cmdline_user_args()
@@ -41,15 +52,23 @@ func _physics_process(delta: float) -> void:
 
 # Additive offset so camera tweens and the 1.55 base height stay untouched.
 func update_bob(delta: float, walking: bool) -> void:
-	var target := Vector3.ZERO
-	if walking:
-		var pace := Vector2(velocity.x, velocity.z).length() / speed
-		bob_phase += delta * 9.0 * pace
-		target = Vector3(sin(bob_phase * 0.5) * 0.012, absf(sin(bob_phase)) * 0.035, 0) * pace
-	var next := bob_offset.lerp(target, clampf(delta * 10.0, 0, 1))
-	if next.length_squared() < 1e-8: next = Vector3.ZERO
-	camera.position += next - bob_offset
-	bob_offset = next
+	var real := get_real_velocity()
+	var pace := clampf(Vector2(real.x, real.z).length() / speed, 0, 1) if walking else 0.0
+	# Walking into a wall is not walking: no dip, no footsteps.
+	var moving := pace > .15
+	bob_weight = move_toward(bob_weight, 1.0 if moving else 0.0, delta / BOB_EASE)
+	# The cadence eases too, so a stop finishes the current dip instead of freezing it.
+	var target_rate := pace * speed * PI / STRIDE
+	bob_rate = lerpf(bob_rate, target_rate, clampf(delta * (12.0 if moving else 5.0), 0, 1))
+	var next := bob_phase + bob_rate * delta
+	# A footfall at the bottom of every dip (phase PI/2 + k*PI).
+	if moving and bob_weight > .3 and floori((next - PI * .5) / PI) != floori((bob_phase - PI * .5) / PI): steps += 1
+	bob_phase = fmod(next, TAU * 64.0)
+	var amount := smoothstep(0.0, 1.0, bob_weight)
+	var target := Vector3(sin(bob_phase) * BOB_SWAY, -(1.0 - cos(bob_phase * 2.0)) * .5 * BOB_DIP, 0) * amount
+	if amount <= 0.0: target = Vector3.ZERO
+	camera.position += target - bob_offset
+	bob_offset = target
 
 func refresh_focus() -> void:
 	if not locked:

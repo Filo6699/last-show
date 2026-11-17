@@ -57,10 +57,13 @@ func setup(owner_game) -> void:
 	for collider in game.model.get_node("GeometryCollisions").get_children():
 		if annex_lamp.call(String(collider.get_meta("source_mesh",""))):collider.collision_layer=0
 	# Warm crossed keys pick out the ring instead of lighting the entire tent evenly.
-	spot("RingAmber",Vector3(-9,10,-5),Vector3(1,0,2),"f5dfbf",3.6,26,48,true,true)
+	# Shadowed keys redraw everything their cone reaches (Compatibility adds a pass
+	# per shadowed light). Narrower cones over the ring saved ~1 ms of a 16 ms
+	# frame; the reach stays, since a shorter range dims the pool itself.
+	spot("RingAmber",Vector3(-9,10,-5),Vector3(1,0,2),"f5dfbf",3.6,26,34,true,true)
 	spot("RingIvory",Vector3(9,11,6),Vector3(-2,0,-1),"ebe3d0",1.8,26,55,false,true)
 	spot("RingCoolRim",Vector3(2,15,-3),Vector3(0,1,6),"b4c5d0",1.4,30,68,false,false)
-	spot("StageKey",Vector3(0,7,-3.5),Vector3(0,.4,-6.2),"f5ddbb",3.4,23,52,true,true)
+	spot("StageKey",Vector3(0,7,-3.5),Vector3(0,.4,-6.2),"f5ddbb",3.4,20,40,true,true)
 	spot("BackstageKey",Vector3(-12,7,26),Vector3(-12,1,29),"ead2b4",2.1,22,42,true,false)
 	# Grazing fills reveal the stepped gallery rather than whitening every wall.
 	spot("GalleryEast",Vector3(4,11,1),Vector3(34,4,16),"bac5ce",1.25,44,58,false,false)

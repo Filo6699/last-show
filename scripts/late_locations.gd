@@ -8,7 +8,9 @@ const ROOF_RETURN:=Vector3(-10.56,40.6,-19.4)
 # radius 24 leaves room for the gate only on this side.
 const MAST:=Vector3(-10,0,-19.4)
 const HATCH_X:=-10.5
-const ROPE:=Vector3(-10.1,41.05,-10)
+# Hangs just past the inner handrail, over the drop to the ring, so the cut
+# bag really falls the forty metres.
+const ROPE:=Vector3(-7.85,41.05,-10)
 const TRAMPOLINE:=Vector3(5.3,40.85,-2)
 # High wire between two pedestal boards, mirrored about the deck centre x=-1.75
 # the way a real circus rigs it: twin masts, twin boards, the wire over the ring.
@@ -23,6 +25,7 @@ const HOME_MIRROR:=Vector3(155,1.7,-10.85)
 var bathroom_glass:MeshInstance3D
 var rope_piece:MeshInstance3D
 var medicine_bag:Node3D
+var rope_target:StaticBody3D
 var pill_cap:MeshInstance3D
 var loose_pills:Array[MeshInstance3D]=[]
 var roof_door:StaticBody3D
@@ -241,7 +244,7 @@ func make_roof() -> void:
 	var cross1:=box(ROPE+Vector3(0,-.3,.165),Vector3(.26,.07,.02),"bfb99a")
 	var cross2:=box(ROPE+Vector3(0,-.3,.165),Vector3(.07,.26,.02),"bfb99a")
 	cross1.reparent(medicine_bag,true);cross2.reparent(medicine_bag,true)
-	var rope_target:=target("roof_rope",ROPE,Vector3(.7,1.2,.5),"Осмотреть трос")
+	rope_target=target("roof_rope",ROPE,Vector3(.7,1.2,.5),"Осмотреть трос")
 	rope_target.set_meta("outline_meshes",[rope_piece,bag])
 	# A full trampoline frame, woven bed, many springs and old shoe marks.
 	var t:=Vector3(TRAMPOLINE.x,y,TRAMPOLINE.z)
@@ -388,4 +391,5 @@ func sync() -> void:
 	for pill in loose_pills:pill.visible=game.flags.get("rope_cut",false)
 	rope_piece.visible=not game.flags.get("rope_cut",false)
 	medicine_bag.visible=not game.flags.get("rope_cut",false)
+	rope_target.collision_layer=0 if game.flags.get("rope_cut",false) else 16
 	pill_cap.position=Vector3(155.65,.95,-10.3) if game.flags.get("rope_cut",false) else Vector3(155.42,1.155,-10.45)
